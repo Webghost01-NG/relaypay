@@ -26,6 +26,18 @@ contract RelayPayInvoiceRegistry is IRelayPay {
     // Nonce counter for unique invoice IDs
     uint256 private _nonceCounter;
 
+    // Reentrancy Guard state
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+    uint256 private _reentrancyStatus = _NOT_ENTERED;
+
+    modifier nonReentrant() {
+        require(_reentrancyStatus != _ENTERED, "RelayPay: Reentrant call");
+        _reentrancyStatus = _ENTERED;
+        _;
+        _reentrancyStatus = _NOT_ENTERED;
+    }
+
     // Anti-replay storage: txHash => processed
     mapping(bytes32 => bool) public processedTxHashes;
 
@@ -88,6 +100,7 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         } else {
             requiredDrops = (amountInUsdCents * 10000) / (xrpPrice * (10 ** uint8(-decimals)));
         }
+        require(requiredDrops > 0, "RelayPay: Calculated drops rounded to zero");
 
         invoiceId = _generateInvoiceId(msg.sender, amountInUsdCents, xrplDestinationAddress);
         bytes32 destinationHash = keccak256(bytes(xrplDestinationAddress));
@@ -165,7 +178,7 @@ contract RelayPayInvoiceRegistry is IRelayPay {
     function verifyAndFulfill(
         bytes32 invoiceId,
         Payment.Proof calldata attestationProof
-    ) external override returns (bool success) {
+    ) external override nonReentrant returns (bool success) {
         // 1. Verify FDC Attestation Proof against consensus Merkle root
         bool isValidProof = fdcVerification.verifyPayment(attestationProof);
         require(isValidProof, "RelayPay: Invalid FDC payment proof");
@@ -272,7 +285,7 @@ contract RelayPayInvoiceRegistry is IRelayPay {
     /**
      * @notice Merchant manual release for late-paid expired invoices
      */
-    function forceFulfillExpired(bytes32 invoiceId) external override onlyMerchant(invoiceId) {
+    function forceFulfillExpired(bytes32 invoiceId) external override onlyMerchant(invoiceId) nonReentrant {
         Invoice storage inv = invoices[invoiceId];
         require(inv.status == InvoiceStatus.EXPIRED_PAID, "RelayPay: Invoice not in EXPIRED_PAID state");
         inv.status = InvoiceStatus.FULFILLED;
@@ -302,7 +315,7 @@ contract RelayPayInvoiceRegistry is IRelayPay {
     /**
      * @notice Cancel pending invoice
      */
-    function cancelInvoice(bytes32 invoiceId) external override onlyMerchant(invoiceId) {
+    function cancelInvoice(bytes32 invoiceId) external override onlyMerchant(invoiceId) nonReentrant {
         Invoice storage inv = invoices[invoiceId];
         require(inv.status == InvoiceStatus.PENDING, "RelayPay: Invoice cannot be cancelled");
         inv.status = InvoiceStatus.CANCELLED;
