@@ -2,22 +2,26 @@
 pragma solidity ^0.8.20;
 
 import { IRelayPay } from "./interfaces/IRelayPay.sol";
-import { IFlareDataConnector } from "./interfaces/IFlareDataConnector.sol";
+import { Payment, IFdcVerification } from "./interfaces/IFlareDataConnector.sol";
 import { IFtsoV2 } from "./interfaces/IFtsoV2.sol";
 import { IRelayPayFulfillment } from "./interfaces/IRelayPayFulfillment.sol";
+import { RelayPayReceipt } from "./RelayPayReceipt.sol";
 
 /**
  * @title RelayPayInvoiceRegistry
- * @notice Core registry and state machine for non-custodial XRP merchant checkouts verified on Flare via FDC & FTSO
+ * @notice Production-grade registry & state machine for non-custodial XRP merchant checkouts verified on Flare via FDC & FTSO
  */
 contract RelayPayInvoiceRegistry is IRelayPay {
 
-    // Flare System Interfaces
-    IFlareDataConnector public immutable fdcVerification;
+    // Flare System Contracts
+    IFdcVerification public immutable fdcVerification;
     IFtsoV2 public immutable ftsoV2;
 
-    // FTSO Feed ID for XRP/USD
+    // Flare FTSO v2 Feed ID for XRP/USD
     bytes21 public immutable xrpUsdFeedId;
+
+    // Receipt NFT Contract
+    RelayPayReceipt public immutable receiptContract;
 
     // Nonce counter for unique invoice IDs
     uint256 private _nonceCounter;
@@ -43,14 +47,16 @@ contract RelayPayInvoiceRegistry is IRelayPay {
     ) {
         require(_fdcVerification != address(0), "RelayPay: Invalid FDC address");
         require(_ftsoV2 != address(0), "RelayPay: Invalid FTSO address");
-        fdcVerification = IFlareDataConnector(_fdcVerification);
+        fdcVerification = IFdcVerification(_fdcVerification);
         ftsoV2 = IFtsoV2(_ftsoV2);
         xrpUsdFeedId = _xrpUsdFeedId;
+
+        // Deploy receipt NFT contract owned by this registry
+        receiptContract = new RelayPayReceipt(address(this));
     }
 
     /**
      * @notice Registers or updates a merchant's custom fulfillment callback contract
-     * @param fulfillmentContract Address of contract implementing IRelayPayFulfillment
      */
     function registerMerchantCallback(address fulfillmentContract) external {
         merchantFulfillmentContracts[msg.sender] = fulfillmentContract;
@@ -58,15 +64,12 @@ contract RelayPayInvoiceRegistry is IRelayPay {
 
     /**
      * @notice Creates an expiring invoice with dynamic FTSO XRP/USD pricing
-     * @param amountInUsdCents Price in USD cents (e.g. 4999 = $49.99)
-     * @param durationSeconds Validity period in seconds (min 60s)
-     * @param xrplDestinationAddress Merchant's native XRPL payment address
-     * @param fulfillmentPayloadHash Hash of merchant order metadata / delivery payload
      */
     function createInvoice(
         uint256 amountInUsdCents,
         uint64 durationSeconds,
         string calldata xrplDestinationAddress,
+        address allowedBuyer,
         bytes32 fulfillmentPayloadHash
     ) external override returns (bytes32 invoiceId) {
         require(amountInUsdCents > 0, "RelayPay: Amount must be > 0");
@@ -79,7 +82,6 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         require(xrpPrice > 0, "RelayPay: Invalid oracle price");
 
         // Compute required XRP drops (1 XRP = 1e6 drops)
-        // Formula: (amountInUsdCents * 1e6 * 10^decimals) / (xrpPrice * 100)
         uint256 requiredDrops;
         if (decimals >= 0) {
             requiredDrops = (amountInUsdCents * 10000 * (10 ** uint8(decimals))) / xrpPrice;
@@ -88,23 +90,27 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         }
 
         invoiceId = _generateInvoiceId(msg.sender, amountInUsdCents, xrplDestinationAddress);
+        bytes32 destinationHash = keccak256(bytes(xrplDestinationAddress));
 
         invoices[invoiceId] = Invoice({
             invoiceId: invoiceId,
             merchant: msg.sender,
-            buyer: address(0),
+            allowedBuyer: allowedBuyer,
             xrplDestinationAddress: xrplDestinationAddress,
+            receivingAddressHash: destinationHash,
             requiredAmountDrops: requiredDrops,
             paidAmountDrops: 0,
             creationTimestamp: uint64(block.timestamp),
             expirationTimestamp: uint64(block.timestamp + durationSeconds),
             status: InvoiceStatus.PENDING,
-            fulfillmentPayloadHash: fulfillmentPayloadHash
+            fulfillmentPayloadHash: fulfillmentPayloadHash,
+            receiptTokenId: 0
         });
 
         emit InvoiceCreated(
             invoiceId,
             msg.sender,
+            allowedBuyer,
             requiredDrops,
             uint64(block.timestamp + durationSeconds),
             xrplDestinationAddress
@@ -118,6 +124,7 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         uint256 requiredAmountDrops,
         uint64 durationSeconds,
         string calldata xrplDestinationAddress,
+        address allowedBuyer,
         bytes32 fulfillmentPayloadHash
     ) external override returns (bytes32 invoiceId) {
         require(requiredAmountDrops > 0, "RelayPay: Required drops must be > 0");
@@ -125,23 +132,27 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         require(bytes(xrplDestinationAddress).length > 0, "RelayPay: Invalid XRPL address");
 
         invoiceId = _generateInvoiceId(msg.sender, requiredAmountDrops, xrplDestinationAddress);
+        bytes32 destinationHash = keccak256(bytes(xrplDestinationAddress));
 
         invoices[invoiceId] = Invoice({
             invoiceId: invoiceId,
             merchant: msg.sender,
-            buyer: address(0),
+            allowedBuyer: allowedBuyer,
             xrplDestinationAddress: xrplDestinationAddress,
+            receivingAddressHash: destinationHash,
             requiredAmountDrops: requiredAmountDrops,
             paidAmountDrops: 0,
             creationTimestamp: uint64(block.timestamp),
             expirationTimestamp: uint64(block.timestamp + durationSeconds),
             status: InvoiceStatus.PENDING,
-            fulfillmentPayloadHash: fulfillmentPayloadHash
+            fulfillmentPayloadHash: fulfillmentPayloadHash,
+            receiptTokenId: 0
         });
 
         emit InvoiceCreated(
             invoiceId,
             msg.sender,
+            allowedBuyer,
             requiredAmountDrops,
             uint64(block.timestamp + durationSeconds),
             xrplDestinationAddress
@@ -153,14 +164,25 @@ contract RelayPayInvoiceRegistry is IRelayPay {
      */
     function verifyAndFulfill(
         bytes32 invoiceId,
-        IFlareDataConnector.PaymentAttestation calldata attestationProof
+        Payment.Proof calldata attestationProof
     ) external override returns (bool success) {
-        // 1. Verify FDC Attestation Proof
+        // 1. Verify FDC Attestation Proof against consensus Merkle root
         bool isValidProof = fdcVerification.verifyPayment(attestationProof);
         require(isValidProof, "RelayPay: Invalid FDC payment proof");
 
-        // 2. Anti-replay check (rejects recycled tx hashes immediately)
-        bytes32 txHash = attestationProof.response.transactionHash;
+        // 2. Source Ledger Status Check
+        require(attestationProof.response.body.status, "RelayPay: XRPL transaction failed on source");
+
+        // 3. Anti-replay check (unique hash per XRPL transaction)
+        bytes32 txHash = keccak256(
+            abi.encodePacked(
+                attestationProof.response.body.standardPaymentReference,
+                attestationProof.response.body.sourceAddressHash,
+                attestationProof.response.body.blockNumber,
+                attestationProof.response.body.blockTimestamp,
+                attestationProof.response.body.receivedAmount
+            )
+        );
         require(!processedTxHashes[txHash], "RelayPay: XRPL tx hash already processed");
 
         Invoice storage inv = invoices[invoiceId];
@@ -170,26 +192,32 @@ contract RelayPayInvoiceRegistry is IRelayPay {
             "RelayPay: Invoice not in payable state"
         );
 
-        // 3. Verify destination matches merchant's XRPL address
+        // 4. Restricted Buyer Check
+        if (inv.allowedBuyer != address(0)) {
+            require(inv.allowedBuyer == msg.sender, "RelayPay: Caller not authorized buyer");
+        }
+
+        // 5. Destination address match
         require(
-            keccak256(bytes(attestationProof.response.destinationAddress)) == keccak256(bytes(inv.xrplDestinationAddress)),
+            attestationProof.response.body.receivingAddressHash == inv.receivingAddressHash,
             "RelayPay: Destination address mismatch"
         );
 
-        // 4. Verify Invoice ID binding in XRPL Memo
+        // 6. Memo invoice ID match
         require(
-            attestationProof.response.memoHash == invoiceId,
+            attestationProof.response.body.standardPaymentReference == invoiceId,
             "RelayPay: Memo invoice ID mismatch"
         );
 
-        // Mark txHash processed to prevent replay
+        // Mark txHash processed to prevent replay attacks
         processedTxHashes[txHash] = true;
 
-        uint256 receivedDrops = attestationProof.response.amountDrops;
-        uint64 txTimestamp = attestationProof.response.blockTimestamp;
+        require(attestationProof.response.body.receivedAmount > 0, "RelayPay: Received amount must be > 0");
+        uint256 receivedDrops = uint256(attestationProof.response.body.receivedAmount);
+        uint64 txTimestamp = attestationProof.response.body.blockTimestamp;
         inv.paidAmountDrops += receivedDrops;
 
-        // 5. Evaluate state machine
+        // 7. State Machine Evaluation
         if (txTimestamp > inv.expirationTimestamp) {
             inv.status = InvoiceStatus.EXPIRED_PAID;
             emit LatePaymentRecorded(invoiceId, txHash, receivedDrops);
@@ -214,12 +242,19 @@ contract RelayPayInvoiceRegistry is IRelayPay {
             );
         }
 
-        // Record buyer address as msg.sender submitting the proof
-        inv.buyer = msg.sender;
+        // 8. Mint Proof-of-Purchase Receipt NFT
+        uint256 receiptId = receiptContract.mintReceipt(
+            msg.sender,
+            invoiceId,
+            inv.merchant,
+            inv.paidAmountDrops,
+            txHash
+        );
+        inv.receiptTokenId = receiptId;
 
-        emit PaymentFulfilled(invoiceId, inv.merchant, txHash, inv.paidAmountDrops, inv.status);
+        emit PaymentFulfilled(invoiceId, inv.merchant, msg.sender, txHash, inv.paidAmountDrops, inv.status, receiptId);
 
-        // 6. Trigger merchant custom callback if registered
+        // 9. Execute Merchant Custom Callback
         address merchantContract = merchantFulfillmentContracts[inv.merchant];
         if (merchantContract != address(0)) {
             bool cbSuccess = IRelayPayFulfillment(merchantContract).onRelayPayFulfill(
@@ -237,12 +272,21 @@ contract RelayPayInvoiceRegistry is IRelayPay {
     /**
      * @notice Merchant manual release for late-paid expired invoices
      */
-    function forceFulfillExpired(bytes32 invoiceId) external onlyMerchant(invoiceId) {
+    function forceFulfillExpired(bytes32 invoiceId) external override onlyMerchant(invoiceId) {
         Invoice storage inv = invoices[invoiceId];
         require(inv.status == InvoiceStatus.EXPIRED_PAID, "RelayPay: Invoice not in EXPIRED_PAID state");
         inv.status = InvoiceStatus.FULFILLED;
 
-        emit PaymentFulfilled(invoiceId, inv.merchant, bytes32(0), inv.paidAmountDrops, inv.status);
+        uint256 receiptId = receiptContract.mintReceipt(
+            msg.sender,
+            invoiceId,
+            inv.merchant,
+            inv.paidAmountDrops,
+            bytes32(0)
+        );
+        inv.receiptTokenId = receiptId;
+
+        emit PaymentFulfilled(invoiceId, inv.merchant, msg.sender, bytes32(0), inv.paidAmountDrops, inv.status, receiptId);
 
         address merchantContract = merchantFulfillmentContracts[inv.merchant];
         if (merchantContract != address(0)) {

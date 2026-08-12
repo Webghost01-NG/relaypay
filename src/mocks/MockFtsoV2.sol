@@ -28,4 +28,8 @@ contract MockFtsoV2 is IFtsoV2 {
     function getFeedValue(bytes21) external view override returns (uint256, int8, uint256) {
         return (mockPrice, mockDecimals, mockTimestamp == 0 ? block.timestamp : mockTimestamp);
     }
+
+    function getFeedById(bytes21) external view override returns (uint256, int8, uint64) {
+        return (mockPrice, mockDecimals, uint64(mockTimestamp == 0 ? block.timestamp : mockTimestamp));
+    }
 }

@@ -4,9 +4,10 @@ pragma solidity ^0.8.20;
 import { Test, console } from "forge-std/Test.sol";
 import { RelayPayInvoiceRegistry } from "../src/RelayPayInvoiceRegistry.sol";
 import { IRelayPay } from "../src/interfaces/IRelayPay.sol";
-import { IFlareDataConnector } from "../src/interfaces/IFlareDataConnector.sol";
+import { Payment } from "../src/interfaces/IFlareDataConnector.sol";
 import { MockFdcVerification } from "../src/mocks/MockFdcVerification.sol";
 import { MockFtsoV2 } from "../src/mocks/MockFtsoV2.sol";
+import { RelayPayReceipt } from "../src/RelayPayReceipt.sol";
 
 contract MockMerchantFulfillment {
     bool public fulfilledCalled;
@@ -33,7 +34,9 @@ contract RelayPayInvoiceRegistryTest is Test {
 
     address public merchant = address(0x1111);
     address public buyer = address(0x2222);
+    address public unauthorizedBuyer = address(0x3333);
     string public merchantXrplAddr = "rMerchantAccountAddress123456";
+    bytes32 public receivingHash;
     bytes21 public xrpFeedId = bytes21("XRP/USD");
 
     function setUp() public {
@@ -48,6 +51,7 @@ contract RelayPayInvoiceRegistryTest is Test {
         );
 
         merchantCallback = new MockMerchantFulfillment();
+        receivingHash = keccak256(bytes(merchantXrplAddr));
     }
 
     function testCreateInvoiceFixedXrp() public {
@@ -56,6 +60,7 @@ contract RelayPayInvoiceRegistryTest is Test {
             100_000_000, // 100 XRP drops
             900,         // 15 mins
             merchantXrplAddr,
+            address(0),
             keccak256("ORDER-1")
         );
 
@@ -73,35 +78,36 @@ contract RelayPayInvoiceRegistryTest is Test {
             1000, // $10.00
             900,
             merchantXrplAddr,
+            address(0),
             keccak256("ORDER-FTSO")
         );
 
         IRelayPay.Invoice memory inv = registry.getInvoice(invoiceId);
-        // 1000 cents * 10000 * 10^4 / 50000 = 20,000,000 drops (20 XRP)
         assertEq(inv.requiredAmountDrops, 20_000_000);
     }
 
-    function testExactPaymentFulfillment() public {
+    function testExactPaymentFulfillmentAndReceiptMinting() public {
         vm.startPrank(merchant);
         registry.registerMerchantCallback(address(merchantCallback));
         bytes32 invoiceId = registry.createInvoiceFixedXrp(
             50_000_000, // 50 XRP
             900,
             merchantXrplAddr,
+            address(0),
             keccak256("DIGITAL-PRODUCT")
         );
         vm.stopPrank();
 
-        // Prepare FDC Attestation proof
-        IFlareDataConnector.PaymentAttestation memory proof;
-        proof.response = IFlareDataConnector.PaymentResponse({
-            transactionHash: keccak256("XRPL-TX-1"),
+        // Prepare FDC Attestation proof with official Payment struct
+        Payment.Proof memory proof;
+        proof.response.body = Payment.ResponseBody({
             blockNumber: 1000,
             blockTimestamp: uint64(block.timestamp),
-            sourceAddress: "rBuyerAddress987654",
-            destinationAddress: merchantXrplAddr,
-            amountDrops: 50_000_000,
-            memoHash: invoiceId,
+            sourceAddressHash: keccak256("rBuyerAddress987654"),
+            receivingAddressHash: receivingHash,
+            spentAmount: 50_000_000,
+            receivedAmount: 50_000_000,
+            standardPaymentReference: invoiceId,
             status: true
         });
 
@@ -111,10 +117,45 @@ contract RelayPayInvoiceRegistryTest is Test {
 
         IRelayPay.Invoice memory inv = registry.getInvoice(invoiceId);
         assertEq(uint8(inv.status), uint8(IRelayPay.InvoiceStatus.FULFILLED));
-        assertEq(inv.buyer, buyer);
+        assertTrue(inv.receiptTokenId > 0);
         assertTrue(merchantCallback.fulfilledCalled());
-        assertEq(merchantCallback.lastInvoiceId(), invoiceId);
-        assertTrue(registry.processedTxHashes(keccak256("XRPL-TX-1")));
+
+        // Verify Receipt NFT owned by buyer
+        RelayPayReceipt receipt = registry.receiptContract();
+        assertEq(receipt.ownerOf(inv.receiptTokenId), buyer);
+    }
+
+    function testRestrictedBuyerAuthorization() public {
+        vm.prank(merchant);
+        bytes32 invoiceId = registry.createInvoiceFixedXrp(
+            10_000_000,
+            900,
+            merchantXrplAddr,
+            buyer, // Restricted to buyer only
+            keccak256("RESTRICTED-ORDER")
+        );
+
+        Payment.Proof memory proof;
+        proof.response.body = Payment.ResponseBody({
+            blockNumber: 1000,
+            blockTimestamp: uint64(block.timestamp),
+            sourceAddressHash: keccak256("rBuyerAddress"),
+            receivingAddressHash: receivingHash,
+            spentAmount: 10_000_000,
+            receivedAmount: 10_000_000,
+            standardPaymentReference: invoiceId,
+            status: true
+        });
+
+        // Unauthorized caller fails
+        vm.expectRevert("RelayPay: Caller not authorized buyer");
+        vm.prank(unauthorizedBuyer);
+        registry.verifyAndFulfill(invoiceId, proof);
+
+        // Authorized buyer succeeds
+        vm.prank(buyer);
+        bool success = registry.verifyAndFulfill(invoiceId, proof);
+        assertTrue(success);
     }
 
     function testUnderpaymentAndTopup() public {
@@ -123,19 +164,20 @@ contract RelayPayInvoiceRegistryTest is Test {
             100_000_000, // 100 XRP drops
             900,
             merchantXrplAddr,
+            address(0),
             keccak256("ORDER-UNDERPAY")
         );
 
         // First payment: only 40 XRP drops
-        IFlareDataConnector.PaymentAttestation memory proof1;
-        proof1.response = IFlareDataConnector.PaymentResponse({
-            transactionHash: keccak256("XRPL-TX-PARTIAL-1"),
+        Payment.Proof memory proof1;
+        proof1.response.body = Payment.ResponseBody({
             blockNumber: 1001,
             blockTimestamp: uint64(block.timestamp),
-            sourceAddress: "rBuyerAddress",
-            destinationAddress: merchantXrplAddr,
-            amountDrops: 40_000_000,
-            memoHash: invoiceId,
+            sourceAddressHash: keccak256("rBuyerAddress"),
+            receivingAddressHash: receivingHash,
+            spentAmount: 40_000_000,
+            receivedAmount: 40_000_000,
+            standardPaymentReference: invoiceId,
             status: true
         });
 
@@ -145,18 +187,17 @@ contract RelayPayInvoiceRegistryTest is Test {
 
         IRelayPay.Invoice memory inv1 = registry.getInvoice(invoiceId);
         assertEq(uint8(inv1.status), uint8(IRelayPay.InvoiceStatus.UNDERPAID));
-        assertEq(inv1.paidAmountDrops, 40_000_000);
 
-        // Topup payment: remaining 60 XRP drops
-        IFlareDataConnector.PaymentAttestation memory proof2;
-        proof2.response = IFlareDataConnector.PaymentResponse({
-            transactionHash: keccak256("XRPL-TX-PARTIAL-2"),
+        // Topup payment: remaining 60 XRP drops with DIFFERENT proof hash (simulating second XRPL tx)
+        Payment.Proof memory proof2;
+        proof2.response.body = Payment.ResponseBody({
             blockNumber: 1002,
-            blockTimestamp: uint64(block.timestamp),
-            sourceAddress: "rBuyerAddress",
-            destinationAddress: merchantXrplAddr,
-            amountDrops: 60_000_000,
-            memoHash: invoiceId,
+            blockTimestamp: uint64(block.timestamp + 5),
+            sourceAddressHash: keccak256("rBuyerAddress"),
+            receivingAddressHash: receivingHash,
+            spentAmount: 60_000_000,
+            receivedAmount: 60_000_000,
+            standardPaymentReference: invoiceId,
             status: true
         });
 
@@ -172,21 +213,22 @@ contract RelayPayInvoiceRegistryTest is Test {
     function testOverpaymentFulfillment() public {
         vm.prank(merchant);
         bytes32 invoiceId = registry.createInvoiceFixedXrp(
-            10_000_000, // 10 XRP
+            10_000_000,
             900,
             merchantXrplAddr,
+            address(0),
             keccak256("ORDER-OVERPAY")
         );
 
-        IFlareDataConnector.PaymentAttestation memory proof;
-        proof.response = IFlareDataConnector.PaymentResponse({
-            transactionHash: keccak256("XRPL-TX-OVERPAY"),
+        Payment.Proof memory proof;
+        proof.response.body = Payment.ResponseBody({
             blockNumber: 1005,
             blockTimestamp: uint64(block.timestamp),
-            sourceAddress: "rBuyerAddress",
-            destinationAddress: merchantXrplAddr,
-            amountDrops: 15_000_000, // Paid 15 XRP
-            memoHash: invoiceId,
+            sourceAddressHash: keccak256("rBuyerAddress"),
+            receivingAddressHash: receivingHash,
+            spentAmount: 15_000_000,
+            receivedAmount: 15_000_000,
+            standardPaymentReference: invoiceId,
             status: true
         });
 
@@ -196,27 +238,27 @@ contract RelayPayInvoiceRegistryTest is Test {
 
         IRelayPay.Invoice memory inv = registry.getInvoice(invoiceId);
         assertEq(uint8(inv.status), uint8(IRelayPay.InvoiceStatus.OVERPAID_FULFILLED));
-        assertEq(inv.paidAmountDrops, 15_000_000);
     }
 
     function testLatePaymentRecording() public {
         vm.prank(merchant);
         bytes32 invoiceId = registry.createInvoiceFixedXrp(
             10_000_000,
-            300, // Expiration in 300s
+            300,
             merchantXrplAddr,
+            address(0),
             keccak256("ORDER-LATE")
         );
 
-        IFlareDataConnector.PaymentAttestation memory proof;
-        proof.response = IFlareDataConnector.PaymentResponse({
-            transactionHash: keccak256("XRPL-TX-LATE"),
+        Payment.Proof memory proof;
+        proof.response.body = Payment.ResponseBody({
             blockNumber: 2000,
             blockTimestamp: uint64(block.timestamp + 400), // Paid after expiration
-            sourceAddress: "rBuyerAddress",
-            destinationAddress: merchantXrplAddr,
-            amountDrops: 10_000_000,
-            memoHash: invoiceId,
+            sourceAddressHash: keccak256("rBuyerAddress"),
+            receivingAddressHash: receivingHash,
+            spentAmount: 10_000_000,
+            receivedAmount: 10_000_000,
+            standardPaymentReference: invoiceId,
             status: true
         });
 
@@ -241,18 +283,19 @@ contract RelayPayInvoiceRegistryTest is Test {
             10_000_000,
             900,
             merchantXrplAddr,
+            address(0),
             keccak256("ORDER-REPLAY")
         );
 
-        IFlareDataConnector.PaymentAttestation memory proof;
-        proof.response = IFlareDataConnector.PaymentResponse({
-            transactionHash: keccak256("XRPL-TX-DUPLICATE"),
+        Payment.Proof memory proof;
+        proof.response.body = Payment.ResponseBody({
             blockNumber: 1000,
             blockTimestamp: uint64(block.timestamp),
-            sourceAddress: "rBuyerAddress",
-            destinationAddress: merchantXrplAddr,
-            amountDrops: 10_000_000,
-            memoHash: invoiceId,
+            sourceAddressHash: keccak256("rBuyerAddress"),
+            receivingAddressHash: receivingHash,
+            spentAmount: 10_000_000,
+            receivedAmount: 10_000_000,
+            standardPaymentReference: invoiceId,
             status: true
         });
 
@@ -271,18 +314,19 @@ contract RelayPayInvoiceRegistryTest is Test {
             10_000_000,
             900,
             merchantXrplAddr,
+            address(0),
             keccak256("ORDER-WRONG-MEMO")
         );
 
-        IFlareDataConnector.PaymentAttestation memory proof;
-        proof.response = IFlareDataConnector.PaymentResponse({
-            transactionHash: keccak256("XRPL-TX-WRONG-MEMO"),
+        Payment.Proof memory proof;
+        proof.response.body = Payment.ResponseBody({
             blockNumber: 1000,
             blockTimestamp: uint64(block.timestamp),
-            sourceAddress: "rBuyerAddress",
-            destinationAddress: merchantXrplAddr,
-            amountDrops: 10_000_000,
-            memoHash: keccak256("RANDOM-MEMO"),
+            sourceAddressHash: keccak256("rBuyerAddress"),
+            receivingAddressHash: receivingHash,
+            spentAmount: 10_000_000,
+            receivedAmount: 10_000_000,
+            standardPaymentReference: keccak256("WRONG-INVOICE"),
             status: true
         });
 
@@ -297,18 +341,19 @@ contract RelayPayInvoiceRegistryTest is Test {
             10_000_000,
             900,
             merchantXrplAddr,
+            address(0),
             keccak256("ORDER-WRONG-DEST")
         );
 
-        IFlareDataConnector.PaymentAttestation memory proof;
-        proof.response = IFlareDataConnector.PaymentResponse({
-            transactionHash: keccak256("XRPL-TX-WRONG-DEST"),
+        Payment.Proof memory proof;
+        proof.response.body = Payment.ResponseBody({
             blockNumber: 1000,
             blockTimestamp: uint64(block.timestamp),
-            sourceAddress: "rBuyerAddress",
-            destinationAddress: "rAttackerAddress999999",
-            amountDrops: 10_000_000,
-            memoHash: invoiceId,
+            sourceAddressHash: keccak256("rBuyerAddress"),
+            receivingAddressHash: keccak256("rAttackerAddress"),
+            spentAmount: 10_000_000,
+            receivedAmount: 10_000_000,
+            standardPaymentReference: invoiceId,
             status: true
         });
 

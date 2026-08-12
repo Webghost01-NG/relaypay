@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { IFlareDataConnector } from "../interfaces/IFlareDataConnector.sol";
+import { Payment, IFdcVerification } from "../interfaces/IFlareDataConnector.sol";
 
 /**
  * @title MockFdcVerification
  * @notice Mock implementation of Flare Data Connector verification for local testing & simulations
  */
-contract MockFdcVerification is IFlareDataConnector {
+contract MockFdcVerification is IFdcVerification {
 
     bool public shouldPassValidation = true;
     mapping(bytes32 => bool) public invalidTxHashes;
@@ -20,9 +20,10 @@ contract MockFdcVerification is IFlareDataConnector {
         invalidTxHashes[_txHash] = _invalid;
     }
 
-    function verifyPayment(PaymentAttestation calldata attestation) external view override returns (bool) {
+    function verifyPayment(Payment.Proof calldata attestation) external view override returns (bool) {
         if (!shouldPassValidation) return false;
-        if (invalidTxHashes[attestation.response.transactionHash]) return false;
-        return attestation.response.status;
+        bytes32 ref = attestation.response.body.standardPaymentReference;
+        if (invalidTxHashes[ref]) return false;
+        return attestation.response.body.status;
     }
 }
