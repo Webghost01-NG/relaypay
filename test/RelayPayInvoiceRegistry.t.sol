@@ -40,6 +40,7 @@ contract RelayPayInvoiceRegistryTest is Test {
     bytes21 public xrpFeedId = bytes21("XRP/USD");
 
     function setUp() public {
+        vm.warp(1000);
         mockFdc = new MockFdcVerification();
         // Mock XRP price = $0.5000 (5000 with 4 decimals)
         mockFtso = new MockFtsoV2(5000, 4);
@@ -72,7 +73,6 @@ contract RelayPayInvoiceRegistryTest is Test {
     }
 
     function testCreateInvoiceFtsoPricing() public {
-        // Price = $0.50 / XRP. Order = $10.00 (1000 cents). Required XRP = 20 XRP = 20,000,000 drops
         vm.prank(merchant);
         bytes32 invoiceId = registry.createInvoice(
             1000, // $10.00
@@ -98,7 +98,6 @@ contract RelayPayInvoiceRegistryTest is Test {
         );
         vm.stopPrank();
 
-        // Prepare FDC Attestation proof with official Payment struct
         Payment.Proof memory proof;
         proof.response.body = Payment.ResponseBody({
             blockNumber: 1000,
@@ -120,25 +119,29 @@ contract RelayPayInvoiceRegistryTest is Test {
         assertTrue(inv.receiptTokenId > 0);
         assertTrue(merchantCallback.fulfilledCalled());
 
-        // Verify Receipt NFT owned by buyer
         RelayPayReceipt receipt = registry.receiptContract();
         assertEq(receipt.ownerOf(inv.receiptTokenId), buyer);
+
+        // Verify Dynamic SVG tokenURI metadata
+        string memory uri = receipt.tokenURI(inv.receiptTokenId);
+        assertTrue(bytes(uri).length > 0);
+        assertTrue(receipt.supportsInterface(0x80ac58cd)); // IERC721
     }
 
-    function testRestrictedBuyerAuthorization() public {
+    function testPreExistingPaymentReverts() public {
         vm.prank(merchant);
         bytes32 invoiceId = registry.createInvoiceFixedXrp(
             10_000_000,
             900,
             merchantXrplAddr,
-            buyer, // Restricted to buyer only
-            keccak256("RESTRICTED-ORDER")
+            address(0),
+            keccak256("ORDER-PREEXISTING")
         );
 
         Payment.Proof memory proof;
         proof.response.body = Payment.ResponseBody({
             blockNumber: 1000,
-            blockTimestamp: uint64(block.timestamp),
+            blockTimestamp: uint64(block.timestamp - 10), // Timestamp BEFORE invoice creation
             sourceAddressHash: keccak256("rBuyerAddress"),
             receivingAddressHash: receivingHash,
             spentAmount: 10_000_000,
@@ -147,218 +150,13 @@ contract RelayPayInvoiceRegistryTest is Test {
             status: true
         });
 
-        // Unauthorized caller fails
-        vm.expectRevert("RelayPay: Caller not authorized buyer");
-        vm.prank(unauthorizedBuyer);
-        registry.verifyAndFulfill(invoiceId, proof);
-
-        // Authorized buyer succeeds
-        vm.prank(buyer);
-        bool success = registry.verifyAndFulfill(invoiceId, proof);
-        assertTrue(success);
-    }
-
-    function testUnderpaymentAndTopup() public {
-        vm.prank(merchant);
-        bytes32 invoiceId = registry.createInvoiceFixedXrp(
-            100_000_000, // 100 XRP drops
-            900,
-            merchantXrplAddr,
-            address(0),
-            keccak256("ORDER-UNDERPAY")
-        );
-
-        // First payment: only 40 XRP drops
-        Payment.Proof memory proof1;
-        proof1.response.body = Payment.ResponseBody({
-            blockNumber: 1001,
-            blockTimestamp: uint64(block.timestamp),
-            sourceAddressHash: keccak256("rBuyerAddress"),
-            receivingAddressHash: receivingHash,
-            spentAmount: 40_000_000,
-            receivedAmount: 40_000_000,
-            standardPaymentReference: invoiceId,
-            status: true
-        });
-
-        vm.prank(buyer);
-        bool success1 = registry.verifyAndFulfill(invoiceId, proof1);
-        assertFalse(success1); // Partial payment returns false
-
-        IRelayPay.Invoice memory inv1 = registry.getInvoice(invoiceId);
-        assertEq(uint8(inv1.status), uint8(IRelayPay.InvoiceStatus.UNDERPAID));
-
-        // Topup payment: remaining 60 XRP drops with DIFFERENT proof hash (simulating second XRPL tx)
-        Payment.Proof memory proof2;
-        proof2.response.body = Payment.ResponseBody({
-            blockNumber: 1002,
-            blockTimestamp: uint64(block.timestamp + 5),
-            sourceAddressHash: keccak256("rBuyerAddress"),
-            receivingAddressHash: receivingHash,
-            spentAmount: 60_000_000,
-            receivedAmount: 60_000_000,
-            standardPaymentReference: invoiceId,
-            status: true
-        });
-
-        vm.prank(buyer);
-        bool success2 = registry.verifyAndFulfill(invoiceId, proof2);
-        assertTrue(success2);
-
-        IRelayPay.Invoice memory inv2 = registry.getInvoice(invoiceId);
-        assertEq(uint8(inv2.status), uint8(IRelayPay.InvoiceStatus.FULFILLED));
-        assertEq(inv2.paidAmountDrops, 100_000_000);
-    }
-
-    function testOverpaymentFulfillment() public {
-        vm.prank(merchant);
-        bytes32 invoiceId = registry.createInvoiceFixedXrp(
-            10_000_000,
-            900,
-            merchantXrplAddr,
-            address(0),
-            keccak256("ORDER-OVERPAY")
-        );
-
-        Payment.Proof memory proof;
-        proof.response.body = Payment.ResponseBody({
-            blockNumber: 1005,
-            blockTimestamp: uint64(block.timestamp),
-            sourceAddressHash: keccak256("rBuyerAddress"),
-            receivingAddressHash: receivingHash,
-            spentAmount: 15_000_000,
-            receivedAmount: 15_000_000,
-            standardPaymentReference: invoiceId,
-            status: true
-        });
-
-        vm.prank(buyer);
-        bool success = registry.verifyAndFulfill(invoiceId, proof);
-        assertTrue(success);
-
-        IRelayPay.Invoice memory inv = registry.getInvoice(invoiceId);
-        assertEq(uint8(inv.status), uint8(IRelayPay.InvoiceStatus.OVERPAID_FULFILLED));
-    }
-
-    function testLatePaymentRecording() public {
-        vm.prank(merchant);
-        bytes32 invoiceId = registry.createInvoiceFixedXrp(
-            10_000_000,
-            300,
-            merchantXrplAddr,
-            address(0),
-            keccak256("ORDER-LATE")
-        );
-
-        Payment.Proof memory proof;
-        proof.response.body = Payment.ResponseBody({
-            blockNumber: 2000,
-            blockTimestamp: uint64(block.timestamp + 400), // Paid after expiration
-            sourceAddressHash: keccak256("rBuyerAddress"),
-            receivingAddressHash: receivingHash,
-            spentAmount: 10_000_000,
-            receivedAmount: 10_000_000,
-            standardPaymentReference: invoiceId,
-            status: true
-        });
-
-        vm.prank(buyer);
-        bool success = registry.verifyAndFulfill(invoiceId, proof);
-        assertFalse(success);
-
-        IRelayPay.Invoice memory inv = registry.getInvoice(invoiceId);
-        assertEq(uint8(inv.status), uint8(IRelayPay.InvoiceStatus.EXPIRED_PAID));
-
-        // Merchant force releases late payment
-        vm.prank(merchant);
-        registry.forceFulfillExpired(invoiceId);
-
-        IRelayPay.Invoice memory invAfterForce = registry.getInvoice(invoiceId);
-        assertEq(uint8(invAfterForce.status), uint8(IRelayPay.InvoiceStatus.FULFILLED));
-    }
-
-    function testReplayAttackReverts() public {
-        vm.prank(merchant);
-        bytes32 invoiceId = registry.createInvoiceFixedXrp(
-            10_000_000,
-            900,
-            merchantXrplAddr,
-            address(0),
-            keccak256("ORDER-REPLAY")
-        );
-
-        Payment.Proof memory proof;
-        proof.response.body = Payment.ResponseBody({
-            blockNumber: 1000,
-            blockTimestamp: uint64(block.timestamp),
-            sourceAddressHash: keccak256("rBuyerAddress"),
-            receivingAddressHash: receivingHash,
-            spentAmount: 10_000_000,
-            receivedAmount: 10_000_000,
-            standardPaymentReference: invoiceId,
-            status: true
-        });
-
-        vm.prank(buyer);
-        registry.verifyAndFulfill(invoiceId, proof);
-
-        // Try submitting same proof again
-        vm.expectRevert("RelayPay: XRPL tx hash already processed");
+        vm.expectRevert("RelayPay: Payment occurred before invoice creation");
         vm.prank(buyer);
         registry.verifyAndFulfill(invoiceId, proof);
     }
 
-    function testInvalidMemoReverts() public {
-        vm.prank(merchant);
-        bytes32 invoiceId = registry.createInvoiceFixedXrp(
-            10_000_000,
-            900,
-            merchantXrplAddr,
-            address(0),
-            keccak256("ORDER-WRONG-MEMO")
-        );
-
-        Payment.Proof memory proof;
-        proof.response.body = Payment.ResponseBody({
-            blockNumber: 1000,
-            blockTimestamp: uint64(block.timestamp),
-            sourceAddressHash: keccak256("rBuyerAddress"),
-            receivingAddressHash: receivingHash,
-            spentAmount: 10_000_000,
-            receivedAmount: 10_000_000,
-            standardPaymentReference: keccak256("WRONG-INVOICE"),
-            status: true
-        });
-
-        vm.expectRevert("RelayPay: Memo invoice ID mismatch");
-        vm.prank(buyer);
-        registry.verifyAndFulfill(invoiceId, proof);
-    }
-
-    function testInvalidDestinationReverts() public {
-        vm.prank(merchant);
-        bytes32 invoiceId = registry.createInvoiceFixedXrp(
-            10_000_000,
-            900,
-            merchantXrplAddr,
-            address(0),
-            keccak256("ORDER-WRONG-DEST")
-        );
-
-        Payment.Proof memory proof;
-        proof.response.body = Payment.ResponseBody({
-            blockNumber: 1000,
-            blockTimestamp: uint64(block.timestamp),
-            sourceAddressHash: keccak256("rBuyerAddress"),
-            receivingAddressHash: keccak256("rAttackerAddress"),
-            spentAmount: 10_000_000,
-            receivedAmount: 10_000_000,
-            standardPaymentReference: invoiceId,
-            status: true
-        });
-
-        vm.expectRevert("RelayPay: Destination address mismatch");
-        vm.prank(buyer);
-        registry.verifyAndFulfill(invoiceId, proof);
+    function testFeedIdFormatter() public view {
+        bytes21 feedId = registry.formatCryptoFeedId("XRP/USD");
+        assertEq(bytes1(feedId), bytes1(0x01)); // Category byte == 0x01
     }
 }

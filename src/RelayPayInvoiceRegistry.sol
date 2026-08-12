@@ -90,14 +90,18 @@ contract RelayPayInvoiceRegistry is IRelayPay {
 
         // Fetch price from FTSO v2
         (uint256 xrpPrice, int8 decimals, uint256 timestamp) = ftsoV2.getFeedValue(xrpUsdFeedId);
-        require(block.timestamp - timestamp <= 600, "RelayPay: Stale FTSO price quote");
+        
+        // Clock Skew Protection: handle timestamp drift across Flare nodes
+        require(timestamp <= block.timestamp && block.timestamp - timestamp <= 600, "RelayPay: Invalid FTSO price timestamp");
         require(xrpPrice > 0, "RelayPay: Invalid oracle price");
 
         // Compute required XRP drops (1 XRP = 1e6 drops)
         uint256 requiredDrops;
         if (decimals >= 0) {
+            require(decimals <= 18, "RelayPay: Excessive oracle decimals");
             requiredDrops = (amountInUsdCents * 10000 * (10 ** uint8(decimals))) / xrpPrice;
         } else {
+            require(decimals >= -18, "RelayPay: Negative oracle decimals out of bounds");
             requiredDrops = (amountInUsdCents * 10000) / (xrpPrice * (10 ** uint8(-decimals)));
         }
         require(requiredDrops > 0, "RelayPay: Calculated drops rounded to zero");
@@ -205,18 +209,22 @@ contract RelayPayInvoiceRegistry is IRelayPay {
             "RelayPay: Invoice not in payable state"
         );
 
-        // 4. Restricted Buyer Check
+        // 4. Creation Timestamp Bounds Check: Reject payments made BEFORE invoice creation
+        uint64 txTimestamp = attestationProof.response.body.blockTimestamp;
+        require(txTimestamp >= inv.creationTimestamp, "RelayPay: Payment occurred before invoice creation");
+
+        // 5. Restricted Buyer Check
         if (inv.allowedBuyer != address(0)) {
             require(inv.allowedBuyer == msg.sender, "RelayPay: Caller not authorized buyer");
         }
 
-        // 5. Destination address match
+        // 6. Destination address match
         require(
             attestationProof.response.body.receivingAddressHash == inv.receivingAddressHash,
             "RelayPay: Destination address mismatch"
         );
 
-        // 6. Memo invoice ID match
+        // 7. Memo invoice ID match
         require(
             attestationProof.response.body.standardPaymentReference == invoiceId,
             "RelayPay: Memo invoice ID mismatch"
@@ -227,12 +235,12 @@ contract RelayPayInvoiceRegistry is IRelayPay {
 
         require(attestationProof.response.body.receivedAmount > 0, "RelayPay: Received amount must be > 0");
         uint256 receivedDrops = uint256(attestationProof.response.body.receivedAmount);
-        uint64 txTimestamp = attestationProof.response.body.blockTimestamp;
         inv.paidAmountDrops += receivedDrops;
 
-        // 7. State Machine Evaluation
+        // 8. State Machine Evaluation
         if (txTimestamp > inv.expirationTimestamp) {
             inv.status = InvoiceStatus.EXPIRED_PAID;
+            inv.allowedBuyer = msg.sender; // Persist buyer address for late payment manual release
             emit LatePaymentRecorded(invoiceId, txHash, receivedDrops);
             return false;
         }
@@ -255,7 +263,7 @@ contract RelayPayInvoiceRegistry is IRelayPay {
             );
         }
 
-        // 8. Mint Proof-of-Purchase Receipt NFT
+        // 9. Mint Proof-of-Purchase Receipt NFT
         uint256 receiptId = receiptContract.mintReceipt(
             msg.sender,
             invoiceId,
@@ -267,7 +275,7 @@ contract RelayPayInvoiceRegistry is IRelayPay {
 
         emit PaymentFulfilled(invoiceId, inv.merchant, msg.sender, txHash, inv.paidAmountDrops, inv.status, receiptId);
 
-        // 9. Execute Merchant Custom Callback
+        // 10. Execute Merchant Custom Callback
         address merchantContract = merchantFulfillmentContracts[inv.merchant];
         if (merchantContract != address(0)) {
             bool cbSuccess = IRelayPayFulfillment(merchantContract).onRelayPayFulfill(
@@ -290,8 +298,11 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         require(inv.status == InvoiceStatus.EXPIRED_PAID, "RelayPay: Invoice not in EXPIRED_PAID state");
         inv.status = InvoiceStatus.FULFILLED;
 
+        // Mint receipt NFT to buyer if recorded, or merchant
+        address recipient = inv.allowedBuyer != address(0) ? inv.allowedBuyer : msg.sender;
+
         uint256 receiptId = receiptContract.mintReceipt(
-            msg.sender,
+            recipient,
             invoiceId,
             inv.merchant,
             inv.paidAmountDrops,
@@ -299,13 +310,13 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         );
         inv.receiptTokenId = receiptId;
 
-        emit PaymentFulfilled(invoiceId, inv.merchant, msg.sender, bytes32(0), inv.paidAmountDrops, inv.status, receiptId);
+        emit PaymentFulfilled(invoiceId, inv.merchant, recipient, bytes32(0), inv.paidAmountDrops, inv.status, receiptId);
 
         address merchantContract = merchantFulfillmentContracts[inv.merchant];
         if (merchantContract != address(0)) {
             IRelayPayFulfillment(merchantContract).onRelayPayFulfill(
                 invoiceId,
-                msg.sender,
+                recipient,
                 inv.paidAmountDrops,
                 inv.fulfillmentPayloadHash
             );
@@ -327,6 +338,19 @@ contract RelayPayInvoiceRegistry is IRelayPay {
      */
     function getInvoice(bytes32 invoiceId) external view override returns (Invoice memory) {
         return invoices[invoiceId];
+    }
+
+    /**
+     * @notice Helper utility to format standard crypto feed IDs (e.g. "XRP/USD" -> 0x01 + XRP/USD)
+     */
+    function formatCryptoFeedId(string memory symbol) public pure returns (bytes21) {
+        bytes memory b = bytes(symbol);
+        require(b.length > 0 && b.length <= 20, "RelayPay: Invalid feed symbol");
+        bytes21 feedId = bytes21(uint168(0x01) << 160); // Set category byte to 0x01 (Crypto)
+        for (uint256 i = 0; i < b.length; i++) {
+            feedId |= bytes21(bytes21(b[i]) >> (8 * (i + 1)));
+        }
+        return feedId;
     }
 
     /**
