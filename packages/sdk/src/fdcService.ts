@@ -1,11 +1,24 @@
-import { keccak256, toUtf8Bytes } from 'ethers';
 import { FdcPaymentAttestationProof } from './types.js';
 
+export interface FdcServiceConfig {
+  /**
+   * Flare FDC Verifier API endpoint URL
+   * Coston2 Testnet: https://fdc-verifiers-coston2.flare.network/
+   * Flare Mainnet:   https://fdc-verifiers.flare.network/
+   */
+  fdcApiUrl: string;
+}
+
 export class FdcService {
-  constructor(private fdcApiUrl?: string) {}
+  private fdcApiUrl: string;
+
+  constructor(config?: FdcServiceConfig) {
+    this.fdcApiUrl =
+      config?.fdcApiUrl || 'https://fdc-verifiers-coston2.flare.network';
+  }
 
   /**
-   * Fetches or simulates an FDC Payment attestation Merkle proof from Flare FDC verifiers
+   * Fetches official cryptographic FDC Payment attestation Merkle proof from live Flare FDC verifiers
    */
   public async fetchPaymentProof(
     xrplTxHash: string,
@@ -14,46 +27,35 @@ export class FdcService {
     amountDrops: string,
     blockTimestamp: number
   ): Promise<FdcPaymentAttestationProof> {
-    if (this.fdcApiUrl) {
-      try {
-        const response = await fetch(`${this.fdcApiUrl}/api/v1/fdc/proof`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            attestationType: 'Payment',
-            sourceId: 'XRP',
-            transactionHash: xrplTxHash,
-          }),
-        });
-
-        if (response.ok) {
-          const data = (await response.json()) as FdcPaymentAttestationProof;
-          return data;
-        }
-      } catch (e) {
-        // Fallback to constructed proof structure if API offline during local testing
-      }
-    }
-
-    // Construct valid FDC Payment attestation proof structure matching Flare IFdcVerification
-    return {
-      merkleProof: [],
-      response: {
-        attestationType: '0x5061796d656e7400000000000000000000000000000000000000000000000000',
-        sourceId: '0x5852500000000000000000000000000000000000000000000000000000000000',
-        votingRound: 1000,
-        lowestUsedTimestamp: blockTimestamp,
-        body: {
-          blockNumber: 1000,
-          blockTimestamp,
-          sourceAddressHash: '0x0000000000000000000000000000000000000000000000000000000000000000',
-          receivingAddressHash: keccak256(toUtf8Bytes(receivingAddress)),
-          spentAmount: amountDrops,
-          receivedAmount: amountDrops,
-          standardPaymentReference: invoiceId,
-          status: true,
-        },
+    const requestPayload = {
+      attestationType: '0x5061796d656e7400000000000000000000000000000000000000000000000000',
+      sourceId: '0x5852500000000000000000000000000000000000000000000000000000000000',
+      messageIntegrityCode: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      requestBody: {
+        transactionId: xrplTxHash.startsWith('0x') ? xrplTxHash : `0x${xrplTxHash}`,
+        inUtxo: 0,
+        utxo: 0,
       },
     };
+
+    const response = await fetch(`${this.fdcApiUrl}/api/v1/fdc/prepare-attestation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestPayload),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(
+        `RelayPay FDC Error: Flare FDC Verifier API failed (${response.status}): ${errText}`
+      );
+    }
+
+    const data = (await response.json()) as FdcPaymentAttestationProof;
+    if (!data.merkleProof || !data.response) {
+      throw new Error('RelayPay FDC Error: Invalid Merkle proof payload returned by Flare FDC verifier');
+    }
+
+    return data;
   }
 }

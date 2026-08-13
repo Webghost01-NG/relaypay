@@ -27,7 +27,7 @@ export class RelayPayClient {
   constructor(private config: RelayPayConfig) {
     this.provider = new JsonRpcProvider(config.flareRpcUrl);
     this.registryContract = new Contract(config.registryAddress, REGISTRY_ABI, this.provider);
-    this.fdcService = new FdcService(config.fdcApiUrl);
+    this.fdcService = new FdcService(config.fdcApiUrl ? { fdcApiUrl: config.fdcApiUrl } : undefined);
   }
 
   /**
