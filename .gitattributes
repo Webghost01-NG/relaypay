@@ -1,0 +1,9 @@
+# GitHub Linguist Language Override
+# Ensures repository language is primarily detected as TypeScript
+lib/** linguist-vendored
+cache/** linguist-vendored
+out/** linguist-vendored
+
+*.ts linguist-language=TypeScript
+*.tsx linguist-language=TypeScript
+packages/** linguist-language=TypeScript
