@@ -1,0 +1,31 @@
+{
+  "name": "@relaypay/sdk",
+  "version": "1.0.0",
+  "description": "TypeScript SDK for RelayPay Non-Custodial XRP Merchant Checkout on Flare EVM via FDC & FTSO v2",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test dist/test/sdk.test.js"
+  },
+  "keywords": [
+    "flare",
+    "xrpl",
+    "xrp",
+    "fdc",
+    "ftso",
+    "merchant",
+    "checkout",
+    "sdk",
+    "evm"
+  ],
+  "author": "Webghost01-NG",
+  "license": "MIT",
+  "dependencies": {
+    "ethers": "^6.13.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^22.5.0"
+  }
+}
