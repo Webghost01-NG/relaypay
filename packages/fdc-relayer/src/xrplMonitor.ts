@@ -53,9 +53,9 @@ export class XrplMonitor {
           if (data.type === 'transaction' && data.validated && tx && tx.TransactionType === 'Payment') {
             const memos = tx.Memos || [];
             if (memos.length > 0) {
-              const memoData = memos[0]?.Memo?.MemoData;
-              if (memoData) {
-                const invoiceId = memoData.startsWith('0x') ? memoData : `0x${memoData}`;
+              const memoHex = memos[0]?.Memo?.MemoData;
+              if (memoHex) {
+                const invoiceId = this.parseInvoiceMemo(memoHex);
                 const amountDrops =
                   typeof tx.Amount === 'string' ? tx.Amount : tx.Amount?.value || '0';
 
@@ -86,6 +86,33 @@ export class XrplMonitor {
         this.options.onError(err);
       }
     }
+  }
+
+  /**
+   * Robust memo hex parser: handles raw 32-byte hex hashes and hex-encoded ASCII/UTF8 invoice IDs
+   */
+  private parseInvoiceMemo(memoHex: string): string {
+    const raw = memoHex.replace(/^0x/i, '');
+
+    // If exact 64-char hex string (32 bytes), return 0x + raw
+    if (raw.length === 64 && /^[0-9a-fA-F]{64}$/.test(raw)) {
+      return `0x${raw.toLowerCase()}`;
+    }
+
+    // Try decoding UTF-8 hex string
+    try {
+      const decoded = Buffer.from(raw, 'hex').toString('utf8').trim();
+      if (decoded.startsWith('0x') && decoded.length === 66) {
+        return decoded.toLowerCase();
+      }
+      if (/^[0-9a-fA-F]{64}$/.test(decoded)) {
+        return `0x${decoded.toLowerCase()}`;
+      }
+    } catch {
+      // Fallback to raw hex
+    }
+
+    return `0x${raw.toLowerCase()}`;
   }
 
   public stop(): void {
