@@ -33,9 +33,7 @@ contract DeployRelayPay is Script {
 
         // XRP/USD Feed ID: category byte 0x01 + "XRP/USD" encoded
         bytes21 xrpUsdFeedId = bytes21(
-            vm.envOr(
-                "XRP_USD_FEED_ID", bytes32(hex"01585250000000000000000000000000000000000000000000000000000000000000")
-            )
+            vm.envOr("XRP_USD_FEED_ID", bytes32(hex"0158525000000000000000000000000000000000000000000000000000000000"))
         );
 
         console.log("Deployer:", vm.addr(deployerPrivateKey));

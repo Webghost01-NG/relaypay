@@ -112,17 +112,25 @@ forge coverage
 
 ---
 
+## 🌐 Live Deployment — Flare Coston2 Testnet
+
+| Contract | Address |
+|----------|--------|
+| **RelayPayInvoiceRegistry** | [`0x8cd2DA9E45D18c47A803f065a3625AE68bF37B17`](https://coston2-explorer.flare.network/address/0x8cd2DA9E45D18c47A803f065a3625AE68bF37B17) |
+| **RelayPayReceipt (ERC-721)** | [`0x447047cC695ceb920D7BD2D7e19F569855Ba4D7C`](https://coston2-explorer.flare.network/address/0x447047cC695ceb920D7BD2D7e19F569855Ba4D7C) |
+| **Deployer** | `0x6CeD8D6Bad8Dfd2e60BCEA116fE74548f959f1F2` |
+| **Chain** | Flare Coston2 Testnet (Chain ID: 114) |
+
 ## 📦 Deployment & Configuration
 
 Deploy to Flare Coston2 Testnet or Flare Mainnet:
 
 ```shell
-export PRIVATE_KEY=0x...
-export FDC_VERIFICATION_ADDRESS=0x1000000000000000000000000000000000000001
-export FTSO_V2_ADDRESS=0x1000000000000000000000000000000000000002
-export XRP_USD_FEED_ID=0x014152502f55534400000000000000000000000000
+export PRIVATE_KEY=0xYOUR_PRIVATE_KEY
 
-forge script script/DeployRelayPay.s.sol:DeployRelayPay --rpc-url https://coston2-api.flare.network/ext/C/rpc --broadcast
+forge script script/DeployRelayPay.s.sol:DeployRelayPay \
+  --rpc-url https://coston2-api.flare.network/ext/C/rpc \
+  --broadcast
 ```
 
 ---
