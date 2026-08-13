@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Navbar } from './components/Navbar';
 import { CheckoutView } from './components/CheckoutView';
 import { MerchantDashboardView } from './components/MerchantDashboardView';
+import { WalletConnectModal } from './components/WalletConnectModal';
 
 interface InvoiceItem {
   invoiceId: string;
@@ -16,6 +17,8 @@ interface InvoiceItem {
 
 export function App() {
   const [currentRole, setCurrentRole] = useState<'checkout' | 'merchant'>('checkout');
+  const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
+  const [connectedAccount, setConnectedAccount] = useState<string | null>(null);
 
   // Active Invoice state for checkout view
   const [activeInvoice, setActiveInvoice] = useState({
@@ -53,7 +56,7 @@ export function App() {
 
     const newInv = {
       invoiceId: newInvoiceId,
-      merchantAddress: '0x0000000000000000000000000000000000000000',
+      merchantAddress: connectedAccount || '0x0000000000000000000000000000000000000000',
       xrplDestination: data.xrplDestination,
       amountUsdCents: data.amountUsdCents,
       requiredXrpFormatted: xrpCalc,
@@ -65,7 +68,7 @@ export function App() {
     setInvoices((prev) => [
       {
         invoiceId: newInvoiceId,
-        merchant: '0x0000000000000000000000000000000000000000',
+        merchant: connectedAccount || '0x0000000000000000000000000000000000000000',
         xrplDestination: data.xrplDestination,
         amountUsdCents: data.amountUsdCents,
         requiredXrpFormatted: xrpCalc,
@@ -90,8 +93,13 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#080A0F] text-[#F8FAFC]">
-      <Navbar currentRole={currentRole} onRoleChange={setCurrentRole} />
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900">
+      <Navbar
+        currentRole={currentRole}
+        onRoleChange={setCurrentRole}
+        connectedAccount={connectedAccount}
+        onOpenWalletModal={() => setIsWalletModalOpen(true)}
+      />
 
       <main>
         {currentRole === 'checkout' ? (
@@ -103,12 +111,23 @@ export function App() {
             requiredXrpFormatted={activeInvoice.requiredXrpFormatted}
             requiredDrops={activeInvoice.requiredDrops}
             expirationTimestamp={activeInvoice.expirationTimestamp}
+            connectedAccount={connectedAccount}
+            onOpenWalletModal={() => setIsWalletModalOpen(true)}
             onFulfillSuccess={handleFulfillSuccess}
           />
         ) : (
           <MerchantDashboardView onCreateInvoice={handleCreateInvoice} invoices={invoices} />
         )}
       </main>
+
+      {/* Web3 Wallet Connect Modal */}
+      <WalletConnectModal
+        isOpen={isWalletModalOpen}
+        onClose={() => setIsWalletModalOpen(false)}
+        account={connectedAccount}
+        onAccountConnected={setConnectedAccount}
+        onAccountDisconnected={() => setConnectedAccount(null)}
+      />
     </div>
   );
 }

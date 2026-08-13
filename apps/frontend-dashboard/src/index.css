@@ -1,15 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --bg-app: #080A0F;
-  --bg-card: #0E121E;
-  --bg-card-elevated: #151A29;
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-active: rgba(0, 240, 255, 0.4);
-  --xrpl-cyan: #00F0FF;
+  --bg-app: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --bg-panel-dark: #0B0F19;
+  --border-light: #E2E8F0;
+  --border-dark: rgba(255, 255, 255, 0.08);
+  --xrpl-cyan: #0284C7;
   --flare-coral: #FF5A36;
-  --text-primary: #F8FAFC;
-  --text-secondary: #94A3B8;
+  --text-dark: #0F172A;
   --text-muted: #64748B;
 }
 
@@ -17,7 +16,7 @@ body {
   margin: 0;
   padding: 0;
   background-color: var(--bg-app);
-  color: var(--text-primary);
+  color: var(--text-dark);
   font-family: 'General Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   overflow-x: hidden;
 }
@@ -31,38 +30,24 @@ body {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Glassmorphism Cards */
-.glass-card {
-  background: rgba(14, 18, 30, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--border-subtle);
+/* Light Glassmorphism & Elevation */
+.light-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border-light);
   border-radius: 1.5rem; /* 24px */
-  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 20px 40px -15px rgba(15, 23, 42, 0.05);
 }
 
-.glass-panel-dark {
-  background: #0B0E17;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+/* Dark Contrast Right Box (Matches CLEAR protocol specification) */
+.dark-panel {
+  background: var(--bg-panel-dark);
+  color: #F8FAFC;
+  border: 1px solid var(--border-dark);
   border-radius: 1.5rem;
 }
 
-.border-active-cyan {
-  border-color: var(--border-active);
-  box-shadow: 0 0 25px rgba(0, 240, 255, 0.15);
-}
-
-/* Glow Effects */
-.glow-cyan {
-  box-shadow: 0 0 30px rgba(0, 240, 255, 0.25);
-}
-
-.glow-coral {
-  box-shadow: 0 0 30px rgba(255, 90, 54, 0.25);
-}
-
 /* Live Pulsing Dot */
-.pulse-dot {
+.pulse-dot-green {
   position: relative;
   display: inline-flex;
   height: 0.5rem;
@@ -71,7 +56,7 @@ body {
   background-color: #10B981;
 }
 
-.pulse-dot::before {
+.pulse-dot-green::before {
   content: '';
   position: absolute;
   top: 0;
@@ -98,14 +83,14 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #080A0F;
+  background: #F1F5F9;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1E2538;
+  background: #CBD5E1;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #00F0FF;
+  background: #0284C7;
 }
