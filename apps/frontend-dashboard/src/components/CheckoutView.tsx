@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import confetti from 'canvas-confetti';
 import {
@@ -12,8 +12,8 @@ import {
   Sparkles,
   RefreshCw,
   Wallet,
+  Lock,
 } from 'lucide-react';
-import { StepBadge } from './StepBadge';
 
 interface CheckoutViewProps {
   invoiceId: string;
@@ -42,26 +42,26 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const [copiedAddress, setCopiedAddress] = useState(false);
   const [copiedMemo, setCopiedMemo] = useState(false);
   const [timeLeftSeconds, setTimeLeftSeconds] = useState<number>(900);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   // Live XRPL Payment Listener State
   const [txState, setTxState] = useState<'IDLE' | 'LISTENING' | 'TX_DETECTED' | 'FDC_PROOF_READY' | 'FULFILLED' | 'EXPIRED'>('LISTENING');
   const [receiptTokenId, setReceiptTokenId] = useState<number | null>(null);
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  // Generate QR Code
+  // Generate QR Code as data URL (reliable in React)
   useEffect(() => {
-    const payUrl = `xrp:${xrplDestination}?amount=${requiredXrpFormatted}&memo=${invoiceId}`;
-    if (canvasRef.current) {
-      QRCode.toCanvas(canvasRef.current, payUrl, {
-        width: 200,
-        margin: 2,
-        color: {
-          dark: '#0F172A',
-          light: '#FFFFFF',
-        },
-      });
-    }
+    const payUrl = `xrp:${xrplDestination}?amount=${requiredXrpFormatted}&dt=${invoiceId.slice(0, 10)}`;
+    QRCode.toDataURL(payUrl, {
+      width: 220,
+      margin: 2,
+      color: {
+        dark: '#0F172A',
+        light: '#FFFFFF',
+      },
+      errorCorrectionLevel: 'H',
+    })
+      .then((url: string) => setQrDataUrl(url))
+      .catch(() => setQrDataUrl(null));
   }, [xrplDestination, requiredXrpFormatted, invoiceId]);
 
   // Countdown timer
@@ -90,298 +90,343 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({
   const formatCountdown = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
-    return `${m}m ${s.toString().padStart(2, '0')}s`;
+    return `${m}:${s.toString().padStart(2, '0')}`;
   };
+
+  const timerPercentage = Math.min(100, (timeLeftSeconds / 900) * 100);
 
   // Simulate Payment / Live FDC Verification Trigger
   const simulatePayment = async () => {
+    if (!connectedAccount) return;
     if (txState === 'FULFILLED') return;
 
     setTxState('TX_DETECTED');
-    await new Promise((r) => setTimeout(r, 1200));
+    await new Promise((r) => setTimeout(r, 1500));
     setTxState('FDC_PROOF_READY');
 
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 1800));
     setTxState('FULFILLED');
-    const mockReceiptId = Math.floor(Math.random() * 8999) + 1000;
-    setReceiptTokenId(mockReceiptId);
+    const mintedReceiptId = Math.floor(Math.random() * 8999) + 1000;
+    setReceiptTokenId(mintedReceiptId);
 
     confetti({
-      particleCount: 90,
-      spread: 75,
+      particleCount: 100,
+      spread: 80,
       origin: { y: 0.6 },
     });
 
     if (onFulfillSuccess) {
-      onFulfillSuccess(mockReceiptId);
+      onFulfillSuccess(mintedReceiptId);
     }
   };
 
-  return (
-    <div className="mx-auto max-w-6xl px-6 py-12">
-      {/* Top Banner & Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-        <div>
-          <StepBadge currentStep={2} totalSteps={3} label="Pay Native XRP" />
-          <h1 className="mt-4 font-display text-4xl md:text-5xl font-extrabold text-slate-900 leading-[1.05] tracking-tight">
-            Complete your XRP Payment
-          </h1>
-          <p className="mt-2 text-base text-slate-600 max-w-xl">
-            Send native XRP directly to the merchant's XRPL wallet. Flare Data Connector attests drops & memo on-chain to trigger non-custodial fulfillment.
-          </p>
-        </div>
+  const verificationStages = [
+    {
+      label: 'XRPL Payment Detected',
+      active: txState !== 'IDLE' && txState !== 'LISTENING',
+      status: txState !== 'IDLE' && txState !== 'LISTENING' ? 'Confirmed' : 'Listening…',
+    },
+    {
+      label: 'FDC Merkle Proof Consensus',
+      active: txState === 'FDC_PROOF_READY' || txState === 'FULFILLED',
+      status: txState === 'FDC_PROOF_READY' || txState === 'FULFILLED' ? 'Verified' : 'Pending',
+    },
+    {
+      label: 'Smart Contract Fulfillment',
+      active: txState === 'FULFILLED',
+      status: txState === 'FULFILLED' ? 'Fulfilled' : 'Pending',
+    },
+  ];
 
-        {/* FTSO Rate Badge */}
-        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100">
-            <Clock className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="text-xs text-slate-500 font-medium">FTSO v2 Oracle Rate</div>
-            <div className="font-mono-tech text-sm font-bold text-slate-900">1 XRP = $0.5000 USD</div>
-            <div className="text-[11px] text-sky-600 font-semibold">Quote expires in: {formatCountdown(timeLeftSeconds)}</div>
-          </div>
+  return (
+    <div className="mx-auto max-w-[1200px] px-6 py-10">
+
+      {/* Page Header */}
+      <div className="mb-8">
+        <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3.5 py-1.5 text-xs font-semibold text-sky-700">
+          <span className="pulse-dot-green"></span>
+          <span>Step 2 of 3 — Pay Native XRP</span>
         </div>
+        <h1 className="mt-4 font-display text-4xl md:text-[2.75rem] font-extrabold text-slate-900 leading-[1.08]">
+          Complete your Payment
+        </h1>
+        <p className="mt-2 text-[15px] text-slate-500 max-w-xl leading-relaxed">
+          Send native XRP to the merchant's XRPL address. Flare Data Connector verifies the transaction on-chain to trigger automatic fulfillment.
+        </p>
       </div>
 
-      {/* Asymmetric Split Grid (1.1fr : 0.9fr) */}
-      <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-        
-        {/* LEFT COLUMN: CRISP LIGHT ACTION CARD */}
-        <section className={`light-card p-8 transition-all ${txState === 'FULFILLED' ? 'border-emerald-500 ring-2 ring-emerald-500/20' : ''}`}>
-          
-          {/* Order Details Header */}
-          <div className="flex items-center justify-between border-b border-slate-100 pb-6">
+      {/* ─── Two Column Grid ─── */}
+      <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+
+        {/* ═══ LEFT: Payment Card ═══ */}
+        <div className={`card-light p-7 transition-all duration-300 ${txState === 'FULFILLED' ? 'border-emerald-400 shadow-emerald-100/60 shadow-lg' : ''}`}>
+
+          {/* Invoice Summary Row */}
+          <div className="flex items-start justify-between pb-5 border-b border-slate-100">
             <div>
-              <span className="text-xs font-mono-tech text-slate-500">ORDER #ORD-2026-9812</span>
-              <h2 className="text-xl font-bold text-slate-900 mt-1">Digital Pro License + SDK Access</h2>
+              <p className="text-[11px] font-mono-tech text-slate-400 tracking-wide uppercase">Invoice</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900 truncate max-w-[240px]">
+                {invoiceId.slice(0, 14)}…{invoiceId.slice(-8)}
+              </p>
             </div>
             <div className="text-right">
-              <div className="text-xs text-slate-500">Fiat Amount</div>
-              <div className="text-2xl font-extrabold text-slate-900 font-display">${(amountUsdCents / 100).toFixed(2)} USD</div>
+              <p className="text-[11px] text-slate-400 uppercase tracking-wide">Total Due</p>
+              <p className="text-2xl font-extrabold text-slate-900 font-display tracking-tight">
+                ${(amountUsdCents / 100).toFixed(2)}
+              </p>
             </div>
           </div>
 
-          {/* Amount to Pay Callout */}
-          <div className="mt-6 rounded-2xl border border-sky-200 bg-sky-50/50 p-5">
-            <div className="text-xs font-bold text-sky-700 uppercase tracking-wider">Required XRP Settlement</div>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="font-mono-tech text-3xl font-extrabold text-slate-900">{requiredXrpFormatted}</span>
-              <span className="text-base font-bold text-sky-600">XRP</span>
-              <span className="text-xs text-slate-500">({requiredDrops} drops)</span>
+          {/* XRP Amount Callout */}
+          <div className="mt-5 rounded-2xl bg-gradient-to-br from-slate-50 to-sky-50/40 border border-slate-200/80 p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold text-sky-700 uppercase tracking-wider">XRP Settlement Amount</p>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="font-mono-tech text-3xl font-extrabold text-slate-900">{requiredXrpFormatted}</span>
+                  <span className="text-sm font-bold text-sky-600">XRP</span>
+                </div>
+                <p className="mt-1 text-[11px] text-slate-400 font-mono-tech">{Number(requiredDrops).toLocaleString()} drops</p>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                  <Clock className="h-3.5 w-3.5" />
+                  <span>FTSO v2 Oracle Rate</span>
+                </div>
+                <span className="font-mono-tech text-xs font-bold text-slate-700">1 XRP = $0.50</span>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <div className="h-1.5 w-20 rounded-full bg-slate-200 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-sky-500 transition-all duration-1000"
+                      style={{ width: `${timerPercentage}%` }}
+                    />
+                  </div>
+                  <span className={`font-mono-tech text-[11px] font-bold ${timeLeftSeconds < 60 ? 'text-rose-500' : 'text-slate-600'}`}>
+                    {formatCountdown(timeLeftSeconds)}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* QR Code & Pay URI */}
-          <div className="mt-8 flex flex-col sm:flex-row items-center gap-6 rounded-2xl border border-slate-200 bg-slate-50/50 p-6">
-            <div className="rounded-xl border border-slate-200 p-2 bg-white shadow-sm">
-              <canvas ref={canvasRef} />
+          {/* QR Code + Scan Prompt */}
+          <div className="mt-6 flex flex-col sm:flex-row items-center gap-5 rounded-2xl border border-slate-200 bg-white p-5">
+            <div className="rounded-2xl border border-slate-100 bg-white p-2 shadow-sm flex-shrink-0">
+              {qrDataUrl ? (
+                <img
+                  src={qrDataUrl}
+                  alt="XRPL Payment QR Code"
+                  width={180}
+                  height={180}
+                  className="rounded-xl"
+                />
+              ) : (
+                <div className="h-[180px] w-[180px] rounded-xl bg-slate-100 grid place-items-center">
+                  <QrCode className="h-10 w-10 text-slate-300" />
+                </div>
+              )}
             </div>
-            <div className="space-y-3 text-center sm:text-left flex-1">
+            <div className="flex-1 space-y-2 text-center sm:text-left">
               <div className="flex items-center justify-center sm:justify-start gap-2 text-sm font-bold text-slate-900">
                 <QrCode className="h-4 w-4 text-sky-600" />
-                <span>Scan via Xaman / Xumm Wallet</span>
+                <span>Scan with Xaman Wallet</span>
               </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Scan QR code or copy payment address and required invoice memo to pay directly from any XRPL wallet.
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Open Xaman (Xumm) on your phone and scan this QR code, or copy the destination address and memo below to pay manually.
               </p>
               <a
-                href={`xrp:${xrplDestination}?amount=${requiredXrpFormatted}&memo=${invoiceId}`}
-                className="inline-flex items-center gap-2 text-xs font-bold text-sky-600 hover:underline"
+                href={`xrp:${xrplDestination}?amount=${requiredXrpFormatted}&dt=${invoiceId.slice(0, 10)}`}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-600 hover:text-sky-800 transition-colors"
               >
-                <span>Open in Native XRPL Wallet</span>
-                <ExternalLink className="h-3.5 w-3.5" />
+                <span>Open in Native Wallet</span>
+                <ExternalLink className="h-3 w-3" />
               </a>
             </div>
           </div>
 
-          {/* Destination Address & Required Memo Inputs */}
-          <div className="mt-6 space-y-4">
-            
-            {/* XRPL Address */}
+          {/* Copy Fields */}
+          <div className="mt-5 space-y-3">
+            {/* Destination */}
             <div>
-              <label className="text-xs font-semibold text-slate-700 flex items-center justify-between mb-1.5">
-                <span>Merchant XRPL Destination Address</span>
-                <span className="text-sky-600 font-mono-tech text-[10px]">REQUIRED</span>
-              </label>
-              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <span className="font-mono-tech text-xs text-slate-900 truncate flex-1">{xrplDestination}</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">XRPL Destination</label>
+                <span className="text-[10px] font-bold text-sky-600 font-mono-tech">REQUIRED</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <span className="font-mono-tech text-xs text-slate-800 truncate flex-1">{xrplDestination}</span>
                 <button
                   onClick={() => copyToClipboard(xrplDestination, 'address')}
-                  className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 hover:border-slate-900 transition-all shadow-sm"
+                  className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:border-slate-400 transition-all flex-shrink-0"
                 >
-                  {copiedAddress ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                  <span>{copiedAddress ? 'Copied' : 'Copy'}</span>
+                  {copiedAddress ? <CheckCircle2 className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                  <span>{copiedAddress ? 'Copied!' : 'Copy'}</span>
                 </button>
               </div>
             </div>
-
-            {/* Required Invoice Memo */}
+            {/* Memo */}
             <div>
-              <label className="text-xs font-semibold text-slate-700 flex items-center justify-between mb-1.5">
-                <span>Required XRPL Transaction Memo (Invoice ID)</span>
-                <span className="text-amber-600 font-mono-tech text-[10px]">DO NOT OMIT MEMO</span>
-              </label>
-              <div className="flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50/50 p-3">
-                <span className="font-mono-tech text-xs text-amber-900 truncate flex-1">{invoiceId}</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Invoice Memo</label>
+                <span className="text-[10px] font-bold text-amber-600 font-mono-tech">DO NOT OMIT</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/50 px-3 py-2.5">
+                <span className="font-mono-tech text-[11px] text-amber-900 truncate flex-1">{invoiceId}</span>
                 <button
                   onClick={() => copyToClipboard(invoiceId, 'memo')}
-                  className="flex items-center gap-1.5 rounded-lg border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold text-amber-800 hover:border-amber-900 transition-all shadow-sm"
+                  className="flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-amber-700 hover:border-amber-500 transition-all flex-shrink-0"
                 >
-                  {copiedMemo ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                  <span>{copiedMemo ? 'Copied' : 'Copy Memo'}</span>
+                  {copiedMemo ? <CheckCircle2 className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                  <span>{copiedMemo ? 'Copied!' : 'Copy'}</span>
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Web3 EVM Wallet Connector & Simulation Controls */}
-          <div className="mt-8 border-t border-slate-100 pt-6 space-y-3">
-            {!connectedAccount ? (
-              <button
-                onClick={onOpenWalletModal}
-                className="w-full py-3.5 px-6 rounded-full font-bold text-sm bg-slate-900 text-white hover:bg-slate-800 transition-all shadow-md flex items-center justify-center gap-2"
-              >
-                <Wallet className="h-4 w-4" />
-                <span>Connect Wallet to Receive ERC-721 NFT</span>
-              </button>
-            ) : (
-              <div className="flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800 font-semibold">
+          {/* Action Zone */}
+          <div className="mt-6 pt-5 border-t border-slate-100 space-y-3">
+
+            {/* Wallet Status */}
+            {connectedAccount ? (
+              <div className="flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-2.5 text-xs text-emerald-800 font-semibold">
                 <span className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  <span>EVM Wallet Connected: {connectedAccount.slice(0, 6)}...{connectedAccount.slice(-4)}</span>
+                  <span>Wallet: {connectedAccount.slice(0, 6)}…{connectedAccount.slice(-4)}</span>
                 </span>
-                <span className="text-[10px] font-mono-tech text-emerald-600">RECEIPT RECIPIENT</span>
+                <span className="text-[10px] font-mono-tech text-emerald-600 uppercase">Receipt Recipient</span>
               </div>
+            ) : (
+              <button
+                onClick={onOpenWalletModal}
+                className="w-full flex items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-3.5 text-sm font-bold text-white hover:bg-slate-800 transition-all shadow-md active:scale-[0.97]"
+              >
+                <Wallet className="h-4 w-4" />
+                <span>Connect EVM Wallet to Continue</span>
+              </button>
             )}
 
-            {/* Simulation Trigger Button */}
+            {/* Simulate Payment Button */}
             <button
               onClick={simulatePayment}
-              disabled={txState === 'FULFILLED'}
-              className={`w-full py-4 px-6 rounded-full font-bold text-sm flex items-center justify-center gap-3 transition-all ${
+              disabled={!connectedAccount || txState === 'FULFILLED' || txState === 'TX_DETECTED' || txState === 'FDC_PROOF_READY'}
+              className={`w-full flex items-center justify-center gap-2.5 rounded-full px-6 py-4 text-sm font-bold transition-all ${
                 txState === 'FULFILLED'
-                  ? 'bg-emerald-600 text-white shadow-md cursor-default'
-                  : 'bg-gradient-to-r from-sky-500 to-slate-900 text-white hover:shadow-lg active:scale-[0.98]'
+                  ? 'bg-emerald-600 text-white cursor-default shadow-lg shadow-emerald-200/50'
+                  : !connectedAccount
+                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    : txState === 'TX_DETECTED' || txState === 'FDC_PROOF_READY'
+                      ? 'bg-sky-600 text-white cursor-wait'
+                      : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-200/60 active:scale-[0.98]'
               }`}
             >
               {txState === 'FULFILLED' ? (
                 <>
                   <CheckCircle2 className="h-5 w-5" />
-                  <span>Payment Cryptographically Verified & Fulfilled!</span>
+                  <span>Payment Verified & Receipt Minted</span>
                 </>
               ) : txState === 'TX_DETECTED' || txState === 'FDC_PROOF_READY' ? (
                 <>
                   <RefreshCw className="h-5 w-5 animate-spin" />
-                  <span>Verifying FDC Proof on Flare EVM...</span>
+                  <span>Verifying via Flare Data Connector…</span>
+                </>
+              ) : !connectedAccount ? (
+                <>
+                  <Lock className="h-4 w-4" />
+                  <span>Connect Wallet First</span>
                 </>
               ) : (
                 <>
-                  <Zap className="h-5 w-5 fill-current text-sky-300" />
-                  <span>Simulate Native XRPL Payment (Hackathon Demo)</span>
+                  <Zap className="h-5 w-5" />
+                  <span>Simulate XRPL Payment (Demo)</span>
                 </>
               )}
             </button>
           </div>
-        </section>
+        </div>
 
-        {/* RIGHT COLUMN: HIGH-CONTRAST DARK OBSIDIAN PROTOCOL PANEL */}
-        <aside className="dark-panel p-8 flex flex-col justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-white flex items-center gap-2.5">
-              <ShieldCheck className="h-6 w-6 text-sky-400" />
-              <span>What FDC & FTSO Guarantees</span>
-            </h2>
+        {/* ═══ RIGHT: Protocol Verification Panel (Dark) ═══ */}
+        <aside className="panel-dark p-7 flex flex-col">
 
-            <ul className="mt-6 space-y-4">
-              <li className="flex items-start gap-3 text-sm">
-                <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-sky-500/20 text-sky-400 font-bold">
-                  ✓
-                </span>
-                <span className="text-slate-300">
-                  <strong className="text-white">FTSO v2 Oracle Rate Lock:</strong> Quote is fixed at $0.50/XRP to protect merchant from crypto market volatility.
-                </span>
-              </li>
-
-              <li className="flex items-start gap-3 text-sm">
-                <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-sky-500/20 text-sky-400 font-bold">
-                  ✓
-                </span>
-                <span className="text-slate-300">
-                  <strong className="text-white">Cryptographic FDC Proof:</strong> Flare Data Connector attests drops, destination, and memo hash on-chain without webhooks.
-                </span>
-              </li>
-
-              <li className="flex items-start gap-3 text-sm">
-                <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-sky-500/20 text-sky-400 font-bold">
-                  ✓
-                </span>
-                <span className="text-slate-300">
-                  <strong className="text-white">On-Chain SVG Receipt:</strong> Minted directly to buyer's EVM wallet upon verification completion.
-                </span>
-              </li>
-            </ul>
-
-            {/* Live Verification Telemetry Stream */}
-            <div className="mt-8 rounded-2xl border border-white/10 bg-[#080A0F] p-5">
-              <div className="text-xs font-semibold text-white uppercase tracking-wider mb-4 flex items-center justify-between">
-                <span>Live Verification Stream</span>
-                <span className="pulse-dot-green"></span>
-              </div>
-
-              <div className="space-y-4">
-                
-                {/* Stage 1: XRPL Tx */}
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <div className={`h-2 w-2 rounded-full ${txState !== 'IDLE' ? 'bg-emerald-400' : 'bg-slate-700'}`}></div>
-                    <span className={txState !== 'IDLE' ? 'text-white font-medium' : 'text-slate-500'}>1. XRPL Payment Listener</span>
-                  </div>
-                  <span className="font-mono-tech text-[10px] text-sky-400">{txState !== 'IDLE' ? 'Active' : 'Waiting'}</span>
-                </div>
-
-                {/* Stage 2: FDC Proof */}
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <div className={`h-2 w-2 rounded-full ${txState === 'FDC_PROOF_READY' || txState === 'FULFILLED' ? 'bg-emerald-400' : 'bg-slate-700'}`}></div>
-                    <span className={txState === 'FDC_PROOF_READY' || txState === 'FULFILLED' ? 'text-white font-medium' : 'text-slate-500'}>2. FDC Merkle Proof Consensus</span>
-                  </div>
-                  <span className="font-mono-tech text-[10px] text-sky-400">
-                    {txState === 'FDC_PROOF_READY' || txState === 'FULFILLED' ? 'Verified' : 'Pending'}
-                  </span>
-                </div>
-
-                {/* Stage 3: Flare Fulfillment */}
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <div className={`h-2 w-2 rounded-full ${txState === 'FULFILLED' ? 'bg-emerald-400' : 'bg-slate-700'}`}></div>
-                    <span className={txState === 'FULFILLED' ? 'text-white font-medium' : 'text-slate-500'}>3. Flare EVM Smart Contract Fulfillment</span>
-                  </div>
-                  <span className="font-mono-tech text-[10px] text-sky-400">
-                    {txState === 'FULFILLED' ? 'Fulfilled' : 'Pending'}
-                  </span>
-                </div>
-              </div>
-            </div>
+          <div className="flex items-center gap-2.5 mb-6">
+            <ShieldCheck className="h-5 w-5 text-sky-400" />
+            <h2 className="text-lg font-bold text-white">Protocol Verification</h2>
           </div>
 
-          {/* On-Chain Receipt Preview Card */}
+          {/* Guarantees */}
+          <ul className="space-y-4 mb-8">
+            {[
+              {
+                title: 'FTSO v2 Rate Lock',
+                desc: 'Oracle-sourced XRP/USD rate protects merchants from volatility during the quote window.',
+              },
+              {
+                title: 'FDC Merkle Proof',
+                desc: 'Flare Data Connector cryptographically attests the XRPL transaction drops, destination, and memo.',
+              },
+              {
+                title: 'On-Chain Receipt NFT',
+                desc: 'ERC-721 proof-of-purchase with full-chain SVG artwork, minted to the buyer\u2019s EVM wallet.',
+              },
+            ].map((item) => (
+              <li key={item.title} className="flex items-start gap-3 text-sm">
+                <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-bold">✓</span>
+                <span className="text-slate-400">
+                  <strong className="text-slate-200">{item.title}:</strong>{' '}
+                  {item.desc}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          {/* Live Verification Stream */}
+          <div className="rounded-2xl border border-white/8 bg-[#060810] p-5 flex-1">
+            <div className="flex items-center justify-between mb-5">
+              <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Live Verification</span>
+              <span className="pulse-dot-green"></span>
+            </div>
+
+            <div className="space-y-5">
+              {verificationStages.map((stage, idx) => (
+                <div key={idx} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`h-2.5 w-2.5 rounded-full transition-colors duration-500 ${stage.active ? 'bg-emerald-400' : 'bg-slate-700'}`} />
+                    <span className={`text-xs transition-colors ${stage.active ? 'text-white font-medium' : 'text-slate-500'}`}>
+                      {idx + 1}. {stage.label}
+                    </span>
+                  </div>
+                  <span className={`font-mono-tech text-[10px] ${stage.active ? 'text-emerald-400' : 'text-slate-600'}`}>
+                    {stage.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Tx Hash Display (after detection) */}
+            {(txState === 'TX_DETECTED' || txState === 'FDC_PROOF_READY' || txState === 'FULFILLED') && (
+              <div className="mt-5 pt-4 border-t border-white/5">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">XRPL Tx Hash</p>
+                <p className="font-mono-tech text-[11px] text-sky-400 truncate">
+                  {invoiceId.slice(0, 42)}…
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Receipt NFT Card */}
           {receiptTokenId && (
-            <div className="mt-6 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 transition-all">
+            <div className="mt-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 animate-fade-in">
               <div className="flex items-center justify-between text-xs font-bold text-emerald-400 mb-2">
                 <span className="flex items-center gap-1.5">
                   <Sparkles className="h-4 w-4" />
-                  <span>ERC-721 Receipt Token #{receiptTokenId} Minted</span>
+                  <span>Receipt NFT #{receiptTokenId}</span>
                 </span>
-                <span className="font-mono-tech text-[10px]">RPR-XRP</span>
+                <span className="font-mono-tech text-[10px] text-emerald-500">ERC-721</span>
               </div>
-              <p className="text-xs text-slate-300">
-                Cryptographic Proof-of-Purchase NFT generated directly on Flare EVM.
+              <p className="text-[11px] text-slate-400">
+                Minted to {connectedAccount?.slice(0, 6)}…{connectedAccount?.slice(-4)} on Flare EVM.
               </p>
             </div>
           )}
         </aside>
-
       </div>
     </div>
   );
