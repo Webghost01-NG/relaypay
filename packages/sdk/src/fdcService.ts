@@ -1,3 +1,4 @@
+import { keccak256, toUtf8Bytes } from 'ethers';
 import { FdcPaymentAttestationProof } from './types.js';
 
 export class FdcService {
@@ -30,7 +31,7 @@ export class FdcService {
           return data;
         }
       } catch (e) {
-        // Fallback to constructed proof structure if API offline during testing
+        // Fallback to constructed proof structure if API offline during local testing
       }
     }
 
@@ -46,7 +47,7 @@ export class FdcService {
           blockNumber: 1000,
           blockTimestamp,
           sourceAddressHash: '0x0000000000000000000000000000000000000000000000000000000000000000',
-          receivingAddressHash: this.hashString(receivingAddress),
+          receivingAddressHash: keccak256(toUtf8Bytes(receivingAddress)),
           spentAmount: amountDrops,
           receivedAmount: amountDrops,
           standardPaymentReference: invoiceId,
@@ -54,12 +55,5 @@ export class FdcService {
         },
       },
     };
-  }
-
-  private hashString(str: string): string {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(str);
-    // Return keccak256 hash or simple SHA representation
-    return '0x' + Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('').padEnd(64, '0').slice(0, 64);
   }
 }

@@ -1,4 +1,4 @@
-import { Contract, JsonRpcProvider, Signer, keccak256, toUtf8Bytes } from 'ethers';
+import { Contract, JsonRpcProvider, Signer } from 'ethers';
 import {
   RelayPayConfig,
   CreateInvoiceOptions,
@@ -12,6 +12,7 @@ import { XRPLPaymentListener } from './xrplListener.js';
 import { FdcService } from './fdcService.js';
 
 const REGISTRY_ABI = [
+  'event InvoiceCreated(bytes32 indexed invoiceId, address indexed merchant, address indexed allowedBuyer, uint256 requiredAmountDrops, uint64 expirationTimestamp, string xrplDestinationAddress)',
   'function createInvoice(uint256 amountInUsdCents, uint64 durationSeconds, string xrplDestinationAddress, address allowedBuyer, bytes32 fulfillmentPayloadHash) returns (bytes32 invoiceId)',
   'function createInvoiceFixedXrp(uint256 requiredAmountDrops, uint64 durationSeconds, string xrplDestinationAddress, address allowedBuyer, bytes32 fulfillmentPayloadHash) returns (bytes32 invoiceId)',
   'function verifyAndFulfill(bytes32 invoiceId, tuple(bytes32[] merkleProof, tuple(bytes32 attestationType, bytes32 sourceId, uint64 votingRound, uint64 lowestUsedTimestamp, tuple(uint64 blockNumber, uint64 blockTimestamp, bytes32 sourceAddressHash, bytes32 receivingAddressHash, int256 spentAmount, int256 receivedAmount, bytes32 standardPaymentReference, bool status) body) response) attestationProof) returns (bool success)',
@@ -62,12 +63,24 @@ export class RelayPayClient {
     }
 
     const receipt = await tx.wait();
-    
-    // Parse InvoiceCreated event or query invoiceId
-    const merchantAddress = await signer.getAddress();
-    const invoiceId = keccak256(
-      toUtf8Bytes(`${merchantAddress}-${Date.now()}-${options.xrplDestinationAddress}`)
-    );
+
+    // Parse the actual invoiceId from the InvoiceCreated event emitted on-chain
+    let invoiceId: string | null = null;
+    for (const log of receipt.logs) {
+      try {
+        const parsed = this.registryContract.interface.parseLog(log);
+        if (parsed && parsed.name === 'InvoiceCreated') {
+          invoiceId = parsed.args.invoiceId;
+          break;
+        }
+      } catch {
+        // Log is from a different contract event
+      }
+    }
+
+    if (!invoiceId) {
+      throw new Error('RelayPay: Failed to extract invoiceId from InvoiceCreated event');
+    }
 
     return this.getInvoice(invoiceId);
   }
