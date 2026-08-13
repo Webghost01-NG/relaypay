@@ -1,0 +1,30 @@
+{
+  "name": "@relaypay/fdc-relayer",
+  "version": "1.0.0",
+  "description": "Automated off-chain daemon relayer listening for XRPL payments, fetching Flare Data Connector proofs, and submitting verification on Flare EVM",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "node --test dist/test/relayer.test.js"
+  },
+  "keywords": [
+    "flare",
+    "fdc",
+    "xrpl",
+    "relayer",
+    "attestation",
+    "daemon"
+  ],
+  "author": "Webghost01-NG",
+  "license": "MIT",
+  "dependencies": {
+    "@relaypay/sdk": "file:../sdk",
+    "ethers": "^6.13.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^22.5.0"
+  }
+}
