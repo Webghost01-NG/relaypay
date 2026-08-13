@@ -104,8 +104,8 @@ forge snapshot
 forge coverage
 ```
 
-### Test Summary (18/18 Tests Passing)
-- **`RelayPayInvoiceRegistryTest`** (10 unit tests covering lifecycle, pricing, top-ups, anti-replay, memo checks)
+### Test Summary (13/13 Tests Passing)
+- **`RelayPayInvoiceRegistryTest`** (5 unit tests covering lifecycle, pricing, top-ups, anti-replay, memo checks)
 - **`RelayPaySecurityTest`** (2 security tests verifying `ReentrancyGuard` and restricted receipt minting)
 - **`RelayPayFuzzTest`** (3 fuzz tests running 256 randomized iterations on drops, oracle rates, and timestamps)
 - **`RelayPayInvariantTest`** (3 invariant tests running 1,920 state transitions proving global invariants)
