@@ -13,10 +13,7 @@ interface IRelayPayFulfillment {
      * @param paidAmountDrops Total XRP drops paid
      * @param payloadHash The merchant payload hash bound to the invoice
      */
-    function onRelayPayFulfill(
-        bytes32 invoiceId,
-        address payer,
-        uint256 paidAmountDrops,
-        bytes32 payloadHash
-    ) external returns (bool);
+    function onRelayPayFulfill(bytes32 invoiceId, address payer, uint256 paidAmountDrops, bytes32 payloadHash)
+        external
+        returns (bool);
 }

@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { IFtsoV2 } from "../interfaces/IFtsoV2.sol";
+import {IFtsoV2} from "../interfaces/IFtsoV2.sol";
 
 /**
  * @title MockFtsoV2
  * @notice Mock implementation of Flare Time Series Oracle v2 for unit testing
  */
 contract MockFtsoV2 is IFtsoV2 {
-
     uint256 public mockPrice;
     int8 public mockDecimals;
     uint256 public mockTimestamp;

@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { IRelayPay } from "./interfaces/IRelayPay.sol";
-import { Payment, IFdcVerification } from "./interfaces/IFlareDataConnector.sol";
-import { IFtsoV2 } from "./interfaces/IFtsoV2.sol";
-import { IRelayPayFulfillment } from "./interfaces/IRelayPayFulfillment.sol";
-import { RelayPayReceipt } from "./RelayPayReceipt.sol";
+import {IRelayPay} from "./interfaces/IRelayPay.sol";
+import {Payment, IFdcVerification} from "./interfaces/IFlareDataConnector.sol";
+import {IFtsoV2} from "./interfaces/IFtsoV2.sol";
+import {IRelayPayFulfillment} from "./interfaces/IRelayPayFulfillment.sol";
+import {RelayPayReceipt} from "./RelayPayReceipt.sol";
 
 /**
  * @title RelayPayInvoiceRegistry
  * @notice Production-grade registry & state machine for non-custodial XRP merchant checkouts verified on Flare via FDC & FTSO
  */
 contract RelayPayInvoiceRegistry is IRelayPay {
-
     // Flare System Contracts
     IFdcVerification public immutable fdcVerification;
     IFtsoV2 public immutable ftsoV2;
@@ -52,11 +51,7 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         _;
     }
 
-    constructor(
-        address _fdcVerification,
-        address _ftsoV2,
-        bytes21 _xrpUsdFeedId
-    ) {
+    constructor(address _fdcVerification, address _ftsoV2, bytes21 _xrpUsdFeedId) {
         require(_fdcVerification != address(0), "RelayPay: Invalid FDC address");
         require(_ftsoV2 != address(0), "RelayPay: Invalid FTSO address");
         fdcVerification = IFdcVerification(_fdcVerification);
@@ -90,9 +85,11 @@ contract RelayPayInvoiceRegistry is IRelayPay {
 
         // Fetch price from FTSO v2
         (uint256 xrpPrice, int8 decimals, uint256 timestamp) = ftsoV2.getFeedValue(xrpUsdFeedId);
-        
+
         // Clock Skew Protection: handle timestamp drift across Flare nodes
-        require(timestamp <= block.timestamp && block.timestamp - timestamp <= 600, "RelayPay: Invalid FTSO price timestamp");
+        require(
+            timestamp <= block.timestamp && block.timestamp - timestamp <= 600, "RelayPay: Invalid FTSO price timestamp"
+        );
         require(xrpPrice > 0, "RelayPay: Invalid oracle price");
 
         // Compute required XRP drops (1 XRP = 1e6 drops)
@@ -179,10 +176,12 @@ contract RelayPayInvoiceRegistry is IRelayPay {
     /**
      * @notice Verifies FDC attestation proof and fulfills invoice exactly once
      */
-    function verifyAndFulfill(
-        bytes32 invoiceId,
-        Payment.Proof calldata attestationProof
-    ) external override nonReentrant returns (bool success) {
+    function verifyAndFulfill(bytes32 invoiceId, Payment.Proof calldata attestationProof)
+        external
+        override
+        nonReentrant
+        returns (bool success)
+    {
         // 1. Verify FDC Attestation Proof against consensus Merkle root
         bool isValidProof = fdcVerification.verifyPayment(attestationProof);
         require(isValidProof, "RelayPay: Invalid FDC payment proof");
@@ -226,8 +225,7 @@ contract RelayPayInvoiceRegistry is IRelayPay {
 
         // 7. Memo invoice ID match
         require(
-            attestationProof.response.body.standardPaymentReference == invoiceId,
-            "RelayPay: Memo invoice ID mismatch"
+            attestationProof.response.body.standardPaymentReference == invoiceId, "RelayPay: Memo invoice ID mismatch"
         );
 
         // Mark txHash processed to prevent replay attacks
@@ -256,21 +254,13 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         } else {
             inv.status = InvoiceStatus.OVERPAID_FULFILLED;
             emit OverpaymentRecorded(
-                invoiceId,
-                inv.requiredAmountDrops,
-                inv.paidAmountDrops,
-                inv.paidAmountDrops - inv.requiredAmountDrops
+                invoiceId, inv.requiredAmountDrops, inv.paidAmountDrops, inv.paidAmountDrops - inv.requiredAmountDrops
             );
         }
 
         // 9. Mint Proof-of-Purchase Receipt NFT
-        uint256 receiptId = receiptContract.mintReceipt(
-            msg.sender,
-            invoiceId,
-            inv.merchant,
-            inv.paidAmountDrops,
-            txHash
-        );
+        uint256 receiptId =
+            receiptContract.mintReceipt(msg.sender, invoiceId, inv.merchant, inv.paidAmountDrops, txHash);
         inv.receiptTokenId = receiptId;
 
         emit PaymentFulfilled(invoiceId, inv.merchant, msg.sender, txHash, inv.paidAmountDrops, inv.status, receiptId);
@@ -278,12 +268,8 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         // 10. Execute Merchant Custom Callback
         address merchantContract = merchantFulfillmentContracts[inv.merchant];
         if (merchantContract != address(0)) {
-            bool cbSuccess = IRelayPayFulfillment(merchantContract).onRelayPayFulfill(
-                invoiceId,
-                msg.sender,
-                inv.paidAmountDrops,
-                inv.fulfillmentPayloadHash
-            );
+            bool cbSuccess = IRelayPayFulfillment(merchantContract)
+                .onRelayPayFulfill(invoiceId, msg.sender, inv.paidAmountDrops, inv.fulfillmentPayloadHash);
             require(cbSuccess, "RelayPay: Merchant callback failed");
         }
 
@@ -301,25 +287,18 @@ contract RelayPayInvoiceRegistry is IRelayPay {
         // Mint receipt NFT to buyer if recorded, or merchant
         address recipient = inv.allowedBuyer != address(0) ? inv.allowedBuyer : msg.sender;
 
-        uint256 receiptId = receiptContract.mintReceipt(
-            recipient,
-            invoiceId,
-            inv.merchant,
-            inv.paidAmountDrops,
-            bytes32(0)
-        );
+        uint256 receiptId =
+            receiptContract.mintReceipt(recipient, invoiceId, inv.merchant, inv.paidAmountDrops, bytes32(0));
         inv.receiptTokenId = receiptId;
 
-        emit PaymentFulfilled(invoiceId, inv.merchant, recipient, bytes32(0), inv.paidAmountDrops, inv.status, receiptId);
+        emit PaymentFulfilled(
+            invoiceId, inv.merchant, recipient, bytes32(0), inv.paidAmountDrops, inv.status, receiptId
+        );
 
         address merchantContract = merchantFulfillmentContracts[inv.merchant];
         if (merchantContract != address(0)) {
-            IRelayPayFulfillment(merchantContract).onRelayPayFulfill(
-                invoiceId,
-                recipient,
-                inv.paidAmountDrops,
-                inv.fulfillmentPayloadHash
-            );
+            IRelayPayFulfillment(merchantContract)
+                .onRelayPayFulfill(invoiceId, recipient, inv.paidAmountDrops, inv.fulfillmentPayloadHash);
         }
     }
 
@@ -356,21 +335,14 @@ contract RelayPayInvoiceRegistry is IRelayPay {
     /**
      * @dev Generates pseudo-random unique invoiceId bound to merchant, nonce, and details
      */
-    function _generateInvoiceId(
-        address merchant,
-        uint256 amount,
-        string calldata destination
-    ) private returns (bytes32) {
+    function _generateInvoiceId(address merchant, uint256 amount, string calldata destination)
+        private
+        returns (bytes32)
+    {
         _nonceCounter++;
         return keccak256(
             abi.encodePacked(
-                block.chainid,
-                address(this),
-                merchant,
-                amount,
-                destination,
-                block.timestamp,
-                _nonceCounter
+                block.chainid, address(this), merchant, amount, destination, block.timestamp, _nonceCounter
             )
         );
     }

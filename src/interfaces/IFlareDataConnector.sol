@@ -27,7 +27,7 @@ library Payment {
         int256 spentAmount;
         int256 receivedAmount;
         bytes32 standardPaymentReference; // Encoded 32-byte Invoice ID from XRPL Memo
-        bool status;                        // Success status on source ledger
+        bool status; // Success status on source ledger
     }
 
     struct Response {

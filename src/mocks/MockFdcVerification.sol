@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { Payment, IFdcVerification } from "../interfaces/IFlareDataConnector.sol";
+import {Payment, IFdcVerification} from "../interfaces/IFlareDataConnector.sol";
 
 /**
  * @title MockFdcVerification
  * @notice Mock implementation of Flare Data Connector verification for local testing & simulations
  */
 contract MockFdcVerification is IFdcVerification {
-
     bool public shouldPassValidation = true;
     mapping(bytes32 => bool) public invalidTxHashes;
 

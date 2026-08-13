@@ -1,24 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { Test, console } from "forge-std/Test.sol";
-import { RelayPayInvoiceRegistry } from "../src/RelayPayInvoiceRegistry.sol";
-import { IRelayPay } from "../src/interfaces/IRelayPay.sol";
-import { Payment } from "../src/interfaces/IFlareDataConnector.sol";
-import { MockFdcVerification } from "../src/mocks/MockFdcVerification.sol";
-import { MockFtsoV2 } from "../src/mocks/MockFtsoV2.sol";
-import { RelayPayReceipt } from "../src/RelayPayReceipt.sol";
+import {Test, console} from "forge-std/Test.sol";
+import {RelayPayInvoiceRegistry} from "../src/RelayPayInvoiceRegistry.sol";
+import {IRelayPay} from "../src/interfaces/IRelayPay.sol";
+import {Payment} from "../src/interfaces/IFlareDataConnector.sol";
+import {MockFdcVerification} from "../src/mocks/MockFdcVerification.sol";
+import {MockFtsoV2} from "../src/mocks/MockFtsoV2.sol";
+import {RelayPayReceipt} from "../src/RelayPayReceipt.sol";
 
 contract MockMerchantFulfillment {
     bool public fulfilledCalled;
     bytes32 public lastInvoiceId;
 
-    function onRelayPayFulfill(
-        bytes32 invoiceId,
-        address,
-        uint256,
-        bytes32
-    ) external returns (bool) {
+    function onRelayPayFulfill(bytes32 invoiceId, address, uint256, bytes32) external returns (bool) {
         fulfilledCalled = true;
         lastInvoiceId = invoiceId;
         return true;
@@ -26,7 +21,6 @@ contract MockMerchantFulfillment {
 }
 
 contract RelayPayInvoiceRegistryTest is Test {
-
     RelayPayInvoiceRegistry public registry;
     MockFdcVerification public mockFdc;
     MockFtsoV2 public mockFtso;
@@ -44,12 +38,8 @@ contract RelayPayInvoiceRegistryTest is Test {
         mockFdc = new MockFdcVerification();
         // Mock XRP price = $0.5000 (5000 with 4 decimals)
         mockFtso = new MockFtsoV2(5000, 4);
-        
-        registry = new RelayPayInvoiceRegistry(
-            address(mockFdc),
-            address(mockFtso),
-            xrpFeedId
-        );
+
+        registry = new RelayPayInvoiceRegistry(address(mockFdc), address(mockFtso), xrpFeedId);
 
         merchantCallback = new MockMerchantFulfillment();
         receivingHash = keccak256(bytes(merchantXrplAddr));
@@ -59,7 +49,7 @@ contract RelayPayInvoiceRegistryTest is Test {
         vm.prank(merchant);
         bytes32 invoiceId = registry.createInvoiceFixedXrp(
             100_000_000, // 100 XRP drops
-            900,         // 15 mins
+            900, // 15 mins
             merchantXrplAddr,
             address(0),
             keccak256("ORDER-1")
@@ -131,11 +121,7 @@ contract RelayPayInvoiceRegistryTest is Test {
     function testPreExistingPaymentReverts() public {
         vm.prank(merchant);
         bytes32 invoiceId = registry.createInvoiceFixedXrp(
-            10_000_000,
-            900,
-            merchantXrplAddr,
-            address(0),
-            keccak256("ORDER-PREEXISTING")
+            10_000_000, 900, merchantXrplAddr, address(0), keccak256("ORDER-PREEXISTING")
         );
 
         Payment.Proof memory proof;

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { Test } from "forge-std/Test.sol";
-import { RelayPayInvoiceRegistry } from "../src/RelayPayInvoiceRegistry.sol";
-import { IRelayPay } from "../src/interfaces/IRelayPay.sol";
-import { Payment } from "../src/interfaces/IFlareDataConnector.sol";
-import { MockFdcVerification } from "../src/mocks/MockFdcVerification.sol";
-import { MockFtsoV2 } from "../src/mocks/MockFtsoV2.sol";
-import { RelayPayReceipt } from "../src/RelayPayReceipt.sol";
+import {Test} from "forge-std/Test.sol";
+import {RelayPayInvoiceRegistry} from "../src/RelayPayInvoiceRegistry.sol";
+import {IRelayPay} from "../src/interfaces/IRelayPay.sol";
+import {Payment} from "../src/interfaces/IFlareDataConnector.sol";
+import {MockFdcVerification} from "../src/mocks/MockFdcVerification.sol";
+import {MockFtsoV2} from "../src/mocks/MockFtsoV2.sol";
+import {RelayPayReceipt} from "../src/RelayPayReceipt.sol";
 
 /**
  * @title MaliciousMerchantCallback
@@ -27,14 +27,9 @@ contract MaliciousMerchantCallback {
         targetInvoiceId = _invoiceId;
     }
 
-    function onRelayPayFulfill(
-        bytes32 invoiceId,
-        address,
-        uint256,
-        bytes32
-    ) external returns (bool) {
+    function onRelayPayFulfill(bytes32 invoiceId, address, uint256, bytes32) external returns (bool) {
         attackAttempted = true;
-        
+
         // Attempt re-entrant call back into registry verifyAndFulfill or cancelInvoice
         Payment.Proof memory dummyProof;
         try registry.verifyAndFulfill(invoiceId, dummyProof) {
@@ -56,7 +51,6 @@ contract MaliciousMerchantCallback {
 }
 
 contract RelayPaySecurityTest is Test {
-
     RelayPayInvoiceRegistry public registry;
     MockFdcVerification public mockFdc;
     MockFtsoV2 public mockFtso;
@@ -71,11 +65,7 @@ contract RelayPaySecurityTest is Test {
     function setUp() public {
         mockFdc = new MockFdcVerification();
         mockFtso = new MockFtsoV2(5000, 4); // $0.50 per XRP
-        registry = new RelayPayInvoiceRegistry(
-            address(mockFdc),
-            address(mockFtso),
-            xrpFeedId
-        );
+        registry = new RelayPayInvoiceRegistry(address(mockFdc), address(mockFtso), xrpFeedId);
 
         attackerCallback = new MaliciousMerchantCallback(address(registry));
         receivingHash = keccak256(bytes(merchantXrplAddr));
@@ -85,11 +75,7 @@ contract RelayPaySecurityTest is Test {
         vm.startPrank(merchant);
         registry.registerMerchantCallback(address(attackerCallback));
         bytes32 invoiceId = registry.createInvoiceFixedXrp(
-            50_000_000,
-            900,
-            merchantXrplAddr,
-            address(0),
-            keccak256("REENTRANCY-TARGET")
+            50_000_000, 900, merchantXrplAddr, address(0), keccak256("REENTRANCY-TARGET")
         );
         vm.stopPrank();
 
@@ -119,12 +105,6 @@ contract RelayPaySecurityTest is Test {
         // Direct caller attempting to call RelayPayReceipt.mintReceipt
         RelayPayReceipt receipt = registry.receiptContract();
         vm.expectRevert("RelayPayReceipt: Only registry can mint");
-        receipt.mintReceipt(
-            buyer,
-            keccak256("FAKE-INVOICE"),
-            merchant,
-            100,
-            keccak256("FAKE-TX")
-        );
+        receipt.mintReceipt(buyer, keccak256("FAKE-INVOICE"), merchant, 100, keccak256("FAKE-TX"));
     }
 }

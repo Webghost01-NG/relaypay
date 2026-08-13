@@ -7,14 +7,17 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  FOUNDRY_PROFILE: ci
+
 jobs:
-  check:
-    name: Foundry project
+  contracts:
+    name: Smart Contracts
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
           submodules: recursive
@@ -33,3 +36,37 @@ jobs:
 
       - name: Run Forge tests
         run: forge test -vvv
+
+  typescript:
+    name: TypeScript Packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build SDK
+        working-directory: packages/sdk
+        run: npm ci && npm run build
+
+      - name: Test SDK
+        working-directory: packages/sdk
+        run: npm test
+
+      - name: Build FDC Relayer
+        working-directory: packages/fdc-relayer
+        run: npm ci && npm run build
+
+      - name: Test FDC Relayer
+        working-directory: packages/fdc-relayer
+        run: npm test
+
+      - name: Build Frontend Dashboard
+        working-directory: apps/frontend-dashboard
+        run: npm ci && npm run build

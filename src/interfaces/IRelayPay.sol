@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import { Payment } from "./IFlareDataConnector.sol";
+import {Payment} from "./IFlareDataConnector.sol";
 
 /**
  * @title IRelayPay
  * @notice Interface for RelayPay XRP Merchant Checkout Protocol on Flare EVM
  */
 interface IRelayPay {
-
     enum InvoiceStatus {
         PENDING,
         FULFILLED,
@@ -25,13 +24,13 @@ interface IRelayPay {
         address allowedBuyer; // address(0) if open to any buyer
         string xrplDestinationAddress;
         bytes32 receivingAddressHash; // keccak256(bytes(xrplDestinationAddress))
-        uint256 requiredAmountDrops;  // Amount in XRP drops (1 XRP = 1,000,000 drops)
+        uint256 requiredAmountDrops; // Amount in XRP drops (1 XRP = 1,000,000 drops)
         uint256 paidAmountDrops;
         uint64 creationTimestamp;
         uint64 expirationTimestamp;
         InvoiceStatus status;
         bytes32 fulfillmentPayloadHash;
-        uint256 receiptTokenId;       // NFT Receipt Token ID (0 if not yet minted)
+        uint256 receiptTokenId; // NFT Receipt Token ID (0 if not yet minted)
     }
 
     // Events
@@ -54,23 +53,12 @@ interface IRelayPay {
         uint256 receiptTokenId
     );
 
-    event UnderpaymentRecorded(
-        bytes32 indexed invoiceId,
-        uint256 requiredDrops,
-        uint256 totalPaidDrops
-    );
+    event UnderpaymentRecorded(bytes32 indexed invoiceId, uint256 requiredDrops, uint256 totalPaidDrops);
 
-    event LatePaymentRecorded(
-        bytes32 indexed invoiceId,
-        bytes32 indexed xrplTxHash,
-        uint256 amountDrops
-    );
+    event LatePaymentRecorded(bytes32 indexed invoiceId, bytes32 indexed xrplTxHash, uint256 amountDrops);
 
     event OverpaymentRecorded(
-        bytes32 indexed invoiceId,
-        uint256 requiredDrops,
-        uint256 totalPaidDrops,
-        uint256 surplusDrops
+        bytes32 indexed invoiceId, uint256 requiredDrops, uint256 totalPaidDrops, uint256 surplusDrops
     );
 
     event InvoiceCancelled(bytes32 indexed invoiceId);
@@ -92,10 +80,9 @@ interface IRelayPay {
         bytes32 fulfillmentPayloadHash
     ) external returns (bytes32 invoiceId);
 
-    function verifyAndFulfill(
-        bytes32 invoiceId,
-        Payment.Proof calldata attestationProof
-    ) external returns (bool success);
+    function verifyAndFulfill(bytes32 invoiceId, Payment.Proof calldata attestationProof)
+        external
+        returns (bool success);
 
     function cancelInvoice(bytes32 invoiceId) external;
     function forceFulfillExpired(bytes32 invoiceId) external;

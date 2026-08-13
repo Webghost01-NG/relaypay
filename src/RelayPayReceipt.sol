@@ -6,7 +6,6 @@ pragma solidity ^0.8.20;
  * @notice Fully ERC-721 compliant On-Chain Proof-of-Purchase Receipt NFT with Dynamic SVG Metadata for RelayPay
  */
 contract RelayPayReceipt {
-
     string public constant name = "RelayPay XRP Commerce Receipt";
     string public constant symbol = "RPR-XRP";
 
@@ -38,13 +37,11 @@ contract RelayPayReceipt {
         registry = _registry;
     }
 
-    function mintReceipt(
-        address to,
-        bytes32 invoiceId,
-        address merchant,
-        uint256 paidAmountDrops,
-        bytes32 xrplTxHash
-    ) external onlyRegistry returns (uint256 tokenId) {
+    function mintReceipt(address to, bytes32 invoiceId, address merchant, uint256 paidAmountDrops, bytes32 xrplTxHash)
+        external
+        onlyRegistry
+        returns (uint256 tokenId)
+    {
         require(to != address(0), "RelayPayReceipt: Mint to zero address");
 
         _tokenCounter++;
@@ -90,9 +87,9 @@ contract RelayPayReceipt {
      */
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
         return
-            interfaceId == 0x01ffc9a7 || // IERC165
-            interfaceId == 0x80ac58cd || // IERC721
-            interfaceId == 0x5b5e139f;   // IERC721Metadata
+            interfaceId == 0x01ffc9a7 // IERC165
+                || interfaceId == 0x80ac58cd // IERC721
+                || interfaceId == 0x5b5e139f; // IERC721Metadata
     }
 
     /**
@@ -120,10 +117,18 @@ contract RelayPayReceipt {
                 "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 250' width='100%' height='100%'>",
                 "<rect width='400' height='250' rx='16' fill='#0f172a'/>",
                 "<text x='20' y='35' fill='#38bdf8' font-family='sans-serif' font-size='16' font-weight='bold'>RelayPay Verified Receipt</text>",
-                "<text x='20' y='65' fill='#94a3b8' font-family='sans-serif' font-size='12'>Token ID: #", _toString(tokenId), "</text>",
-                "<text x='20' y='95' fill='#f8fafc' font-family='sans-serif' font-size='14'>Amount Paid: ", _formatXrp(r.paidAmountDrops), " XRP</text>",
-                "<text x='20' y='125' fill='#94a3b8' font-family='sans-serif' font-size='11'>Merchant: ", _toHexString(uint160(r.merchant)), "</text>",
-                "<text x='20' y='155' fill='#94a3b8' font-family='sans-serif' font-size='11'>Buyer: ", _toHexString(uint160(r.buyer)), "</text>",
+                "<text x='20' y='65' fill='#94a3b8' font-family='sans-serif' font-size='12'>Token ID: #",
+                _toString(tokenId),
+                "</text>",
+                "<text x='20' y='95' fill='#f8fafc' font-family='sans-serif' font-size='14'>Amount Paid: ",
+                _formatXrp(r.paidAmountDrops),
+                " XRP</text>",
+                "<text x='20' y='125' fill='#94a3b8' font-family='sans-serif' font-size='11'>Merchant: ",
+                _toHexString(uint160(r.merchant)),
+                "</text>",
+                "<text x='20' y='155' fill='#94a3b8' font-family='sans-serif' font-size='11'>Buyer: ",
+                _toHexString(uint160(r.buyer)),
+                "</text>",
                 "<text x='20' y='215' fill='#22c55e' font-family='sans-serif' font-size='11'>Status: Cryptographically Verified via Flare FDC</text>",
                 "</svg>"
             )
