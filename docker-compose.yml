@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  # ─── Frontend Dashboard ────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - VITE_REGISTRY_ADDRESS=${REGISTRY_ADDRESS}
+      - VITE_FLARE_RPC_URL=${FLARE_RPC_URL}
+      - VITE_FDC_API_URL=${FDC_API_URL}
+      - VITE_XRPL_WSS_URL=${XRPL_WSS_URL}
+    restart: unless-stopped
+
+  # ─── FDC Relayer Daemon ────────────────────────────────────
+  relayer:
+    build:
+      context: .
+      dockerfile: docker/relayer.Dockerfile
+    env_file:
+      - .env
+    environment:
+      - RELAYER_PRIVATE_KEY=${RELAYER_PRIVATE_KEY}
+      - REGISTRY_ADDRESS=${REGISTRY_ADDRESS}
+      - FLARE_RPC_URL=${FLARE_RPC_URL}
+      - XRPL_WSS_URL=${XRPL_WSS_URL}
+      - FDC_API_URL=${FDC_API_URL}
+      - MONITORED_XRPL_ACCOUNTS=${MONITORED_XRPL_ACCOUNTS}
+    restart: unless-stopped
